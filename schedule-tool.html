@@ -54,7 +54,7 @@ input[type="file"]{display:none}
 .legend{display:flex;flex-wrap:wrap;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border);background:#fafbfc}
 .legend-item{display:flex;align-items:center;gap:5px;font-size:.72rem;color:var(--text-2)}
 .legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
-.gantt-wrap{overflow-x:auto}
+.gantt-wrap{overflow-x:auto;overflow-y:visible}
 .gantt-inner{min-width:900px}
 .gantt-months{display:flex;margin-left:200px;border-bottom:1px solid var(--border)}
 .month-col{flex-shrink:0;text-align:center;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3);padding:6px 0;border-right:1px solid var(--border)}
@@ -461,21 +461,64 @@ function renderGantt(nameA,nameB){
         </div>`;
       }
     } else {
-      const msList=S.view==='gantt'?phase.msA:[...phase.msA,...phase.msB];
-      const seen=new Set();
-      for(const ms of msList){
-        if(seen.has(ms.event+ms.date))continue;
-        seen.add(ms.event+ms.date);
-        const left=pct(ms.date);
-        const isRange=ms.type==='range'&&ms.endDate;
-        const w=isRange?Math.max(0.5,pct(ms.endDate)-left):0;
-        const barHtml=isRange
-          ?`<div class="bar" style="left:${left}%;width:${w}%;background:${c.bar};color:${c.text}" title="${ms.event}: ${ms.date}~${ms.endDate}">${w>4?ms.event:''}</div>`
-          :`<div class="diamond" style="left:${left}%;background:${ms.critical?'#c0392b':c.pillText}" title="${ms.event}: ${ms.date}"></div>`;
-        phasesHtml+=`<div class="milestone-row">
-          <div class="ms-label" title="${ms.event}">${ms.event}</div>
-          <div class="ms-track">${todayLine}${barHtml}</div>
-        </div>`;
+      // In gantt view: show A and B in same row if same event, else separate rows
+      if(S.view==='gantt'){
+        // Build merged row list: match by event name
+        const mapB=new Map(phase.msB.map(m=>[m.event,m]));
+        const shownB=new Set();
+        for(const msA of phase.msA){
+          const msB=mapB.get(msA.event);
+          shownB.add(msA.event);
+          const leftA=pct(msA.date);
+          const wA=msA.type==='range'&&msA.endDate?Math.max(0.5,pct(msA.endDate)-leftA):0;
+          const barA=wA>0
+            ?`<div class="bar" style="left:${leftA}%;width:${wA}%;background:${c.bar};color:${c.text};top:4px" title="${nameA}: ${msA.event} ${msA.date}~${msA.endDate}">${wA>4?msA.event:''}</div>`
+            :`<div class="diamond" style="left:${leftA}%;background:${msA.critical?'#c0392b':c.pillText};top:7px" title="${nameA}: ${msA.event} ${msA.date}"></div>`;
+          let barB='';
+          if(msB){
+            const leftB=pct(msB.date);
+            const wB=msB.type==='range'&&msB.endDate?Math.max(0.5,pct(msB.endDate)-leftB):0;
+            const bColor=hasB?'#34d399':''+c.bar;
+            barB=wB>0
+              ?`<div class="bar" style="left:${leftB}%;width:${wB}%;background:#dcfce7;color:#166534;top:16px;height:12px;font-size:.6rem" title="${nameB}: ${msB.event} ${msB.date}~${msB.endDate}">${wB>4?msB.event:''}</div>`
+              :`<div class="diamond" style="left:${leftB}%;background:#16a34a;top:19px;width:8px;height:8px" title="${nameB}: ${msB.event} ${msB.date}"></div>`;
+          }
+          const rowH=msB?'min-height:42px':'min-height:32px';
+          phasesHtml+=`<div class="milestone-row" style="${rowH}">
+            <div class="ms-label" title="${msA.event}">${msA.event}</div>
+            <div class="ms-track" style="height:${msB?42:32}px">${todayLine}${barA}${barB}</div>
+          </div>`;
+        }
+        // Show B-only rows
+        for(const msB of phase.msB){
+          if(shownB.has(msB.event))continue;
+          const leftB=pct(msB.date);
+          const wB=msB.type==='range'&&msB.endDate?Math.max(0.5,pct(msB.endDate)-leftB):0;
+          const barB=wB>0
+            ?`<div class="bar" style="left:${leftB}%;width:${wB}%;background:#dcfce7;color:#166534;top:7px" title="${nameB}: ${msB.event} ${msB.date}~${msB.endDate}">${wB>4?msB.event:''}</div>`
+            :`<div class="diamond" style="left:${leftB}%;background:#16a34a;top:11px" title="${nameB}: ${msB.event} ${msB.date}"></div>`;
+          phasesHtml+=`<div class="milestone-row" style="background:#f0fdf4">
+            <div class="ms-label" title="${msB.event}" style="color:#16a34a">${msB.event}</div>
+            <div class="ms-track">${todayLine}${barB}</div>
+          </div>`;
+        }
+      } else {
+        const msList=[...phase.msA,...phase.msB];
+        const seen=new Set();
+        for(const ms of msList){
+          if(seen.has(ms.event+ms.date))continue;
+          seen.add(ms.event+ms.date);
+          const left=pct(ms.date);
+          const isRange=ms.type==='range'&&ms.endDate;
+          const w=isRange?Math.max(0.5,pct(ms.endDate)-left):0;
+          const barHtml=isRange
+            ?`<div class="bar" style="left:${left}%;width:${w}%;background:${c.bar};color:${c.text}" title="${ms.event}: ${ms.date}~${ms.endDate}">${w>4?ms.event:''}</div>`
+            :`<div class="diamond" style="left:${left}%;background:${ms.critical?'#c0392b':c.pillText}" title="${ms.event}: ${ms.date}"></div>`;
+          phasesHtml+=`<div class="milestone-row">
+            <div class="ms-label" title="${ms.event}">${ms.event}</div>
+            <div class="ms-track">${todayLine}${barHtml}</div>
+          </div>`;
+        }
       }
     }
     phasesHtml+='</div></div>';
@@ -519,6 +562,9 @@ function renderGantt(nameA,nameB){
       </div>
       <div class="legend">${legendHtml}
         <div class="legend-item"><div style="width:10px;height:10px;background:#c0392b;transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>Critical</div>
+        ${hasB?`<span style="width:1px;background:var(--border);height:14px;margin:0 4px"></span>
+        <div class="legend-item"><div style="width:24px;height:10px;background:${COLORS.blue.bar};border-radius:2px"></div>${nameA}</div>
+        <div class="legend-item"><div style="width:24px;height:10px;background:#dcfce7;border:1px solid #16a34a;border-radius:2px"></div>${nameB}</div>`:''}
       </div>
       ${S.view!=='list'?`
       <div class="gantt-wrap"><div class="gantt-inner">
