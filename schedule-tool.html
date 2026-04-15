@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schedule Gantt Parser</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface2: #f8f9fb;
+  --border: #e2e5ea;
+  --text-1: #0f1523;
+  --text-2: #4a5568;
+  --text-3: #8c97a8;
+  --accent: #0057ff;
+  --accent-lt: #e8effe;
+  --green: #00875a;
+  --green-lt: #e3f5ef;
+  --red: #c0392b;
+  --red-lt: #fdf0ef;
+  --amber: #b45309;
+  --amber-lt: #fef3c7;
+  --sans: 'Outfit', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+  --r: 10px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--sans); background: var(--bg); color: var(--text-1); min-height: 100vh; font-size: 14px; -webkit-font-smoothing: antialiased; }
+
+/* Topbar */
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 200; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.topbar-icon { width: 30px; height: 30px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; flex-shrink: 0; }
+.topbar-title { font-weight: 700; font-size: .95rem; }
+.topbar-sub { font-size: .75rem; color: var(--text-3); }
+
+/* Layout */
+.main { max-width: 1300px; margin: 0 auto; padding: 28px 32px; }
+
+/* Upload panel */
+.upload-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 24px; margin-bottom: 20px; }
+.panel-title { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-3); margin-bottom: 14px; }
+
+.upload-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.slot { border: 2px dashed var(--border); border-radius: var(--r); padding: 20px; text-align: center; cursor: pointer; transition: all .2s; position: relative; }
+.slot:hover { border-color: var(--accent); background: var(--accent-lt); }
+.slot.loaded { border-color: var(--green); border-style: solid; background: var(--green-lt); }
+.slot.loading { border-color: var(--accent); border-style: solid; background: var(--accent-lt); }
+.slot-icon { font-size: 1.6rem; margin-bottom: 6px; }
+.slot-label { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
+.slot-name { font-size: .72rem; color: var(--green); font-family: var(--mono); margin-top: 4px; font-weight: 600; word-break: break-all; }
+.slot-hint { font-size: .72rem; color: var(--text-3); margin-top: 3px; }
+.slot-status { font-size: .72rem; color: var(--accent); margin-top: 3px; font-weight: 500; }
+input[type="file"] { display: none; }
+
+.name-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.name-field label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); display: block; margin-bottom: 5px; }
+.name-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text-1); padding: 7px 10px; font-size: .88rem; font-family: var(--sans); transition: border-color .15s; }
+.name-field input:focus { outline: none; border-color: var(--accent); background: white; }
+
+.parse-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 11px; background: var(--accent); color: white; border: none; border-radius: 8px; font-size: .92rem; font-weight: 700; font-family: var(--sans); cursor: pointer; transition: all .2s; box-shadow: 0 3px 10px rgba(0,87,255,.2); }
+.parse-btn:hover:not(:disabled) { background: #0047d9; transform: translateY(-1px); }
+.parse-btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+/* Status */
+.status-bar { background: var(--accent-lt); border: 1px solid #c0d0ff; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: .82rem; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+.status-spinner { width: 14px; height: 14px; border: 2px solid rgba(0,87,255,.3); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Gantt */
+.gantt-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; margin-bottom: 20px; }
+.gantt-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 10px; }
+.gantt-project { font-weight: 700; font-size: .95rem; }
+.gantt-meta { font-size: .75rem; color: var(--text-3); }
+.toolbar-right { display: flex; gap: 6px; align-items: center; }
+.tab-btn { padding: 5px 14px; border-radius: 6px; font-size: .75rem; font-weight: 600; border: 1px solid var(--border); background: transparent; cursor: pointer; color: var(--text-3); font-family: var(--sans); transition: all .15s; }
+.tab-btn.active { background: var(--surface2); border-color: var(--border); color: var(--text-1); }
+.export-btn { padding: 5px 14px; border-radius: 6px; font-size: .75rem; font-weight: 600; border: 1px solid var(--accent); background: var(--accent-lt); cursor: pointer; color: var(--accent); font-family: var(--sans); }
+.export-btn:hover { background: var(--accent); color: white; }
+
+.gantt-wrap { overflow-x: auto; }
+.gantt-inner { min-width: 900px; }
+
+/* Month header */
+.gantt-months { display: flex; margin-left: 200px; border-bottom: 1px solid var(--border); }
+.month-col { flex-shrink: 0; text-align: center; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); padding: 6px 0; border-right: 1px solid var(--border); }
+.month-col.now { color: var(--accent); background: #f0f5ff; }
+
+/* Phase rows */
+.phase-section { border-bottom: 1px solid var(--border); }
+.phase-section:last-child { border-bottom: none; }
+.phase-header { display: flex; align-items: center; padding: 7px 16px 7px 16px; background: var(--surface2); border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+.phase-header:hover { background: var(--bg); }
+.phase-expand { font-size: 10px; color: var(--text-3); margin-right: 8px; transition: transform .2s; }
+.phase-expand.open { transform: rotate(90deg); }
+.phase-name { font-size: .78rem; font-weight: 700; flex: 1; }
+.phase-pill { font-size: .65rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+.phase-body { }
+
+.milestone-row { display: flex; align-items: center; border-bottom: 0.5px solid #f0f2f5; min-height: 32px; }
+.milestone-row:last-child { border-bottom: none; }
+.ms-label { width: 200px; flex-shrink: 0; padding: 6px 10px 6px 24px; font-size: .75rem; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-track { flex: 1; position: relative; height: 32px; }
+.today-line { position: absolute; top: 0; bottom: 0; width: 1.5px; background: rgba(0,87,255,.3); z-index: 5; pointer-events: none; }
+
+/* Bars */
+.bar { position: absolute; height: 18px; top: 7px; border-radius: 4px; display: flex; align-items: center; padding: 0 6px; font-size: .65rem; font-weight: 600; white-space: nowrap; overflow: hidden; cursor: default; transition: opacity .15s; }
+.bar:hover { opacity: .8; }
+.diamond { position: absolute; width: 9px; height: 9px; top: 11.5px; transform: rotate(45deg) translateX(-50%); border-radius: 1px; cursor: default; z-index: 3; }
+.diamond:hover::after { content: attr(data-tip); position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: rgba(15,21,35,.9); color: white; padding: 3px 7px; border-radius: 4px; font-size: .65rem; white-space: nowrap; font-family: var(--sans); pointer-events: none; z-index: 10; }
+
+/* Compare toggle */
+.compare-row { display: flex; align-items: center; min-height: 32px; border-bottom: 0.5px solid #f0f2f5; }
+.compare-row:last-child { border-bottom: none; }
+.compare-label { width: 200px; flex-shrink: 0; padding: 4px 10px 4px 24px; font-size: .72rem; color: var(--text-2); }
+.compare-dates { flex: 1; display: flex; gap: 4px; align-items: center; padding: 4px 8px; font-size: .72rem; }
+.date-a { color: var(--accent); font-family: var(--mono); font-weight: 600; }
+.date-b { color: var(--green); font-family: var(--mono); font-weight: 600; }
+.diff-badge { font-size: .65rem; padding: 1px 6px; border-radius: 4px; font-weight: 700; }
+.diff-late { background: var(--red-lt); color: var(--red); }
+.diff-early { background: var(--green-lt); color: var(--green); }
+.diff-same { background: #f0f2f5; color: var(--text-3); }
+
+/* Milestones list */
+.ms-list { padding: 16px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.ms-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.ms-card-phase { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.ms-item { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 0.5px solid var(--border); font-size: .75rem; }
+.ms-item:last-child { border-bottom: none; }
+.ms-event { color: var(--text-2); flex: 1; padding-right: 8px; }
+.ms-date { font-family: var(--mono); font-size: .7rem; font-weight: 600; white-space: nowrap; }
+.ms-date.past { color: var(--text-3); text-decoration: line-through; }
+.ms-date.soon { color: var(--amber); }
+.ms-date.critical { color: var(--red); }
+
+/* Source badge */
+.src-a { color: var(--accent); }
+.src-b { color: var(--green); }
+.src-both { color: var(--amber); }
+
+/* Empty state */
+.empty { text-align: center; padding: 60px 20px; color: var(--text-3); }
+.empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+.empty-title { font-size: 1rem; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.empty-sub { font-size: .82rem; }
+
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-icon">📅</div>
+  <div>
+    <div class="topbar-title">Schedule Gantt Tool</div>
+    <div class="topbar-sub">Upload PPTX from any company — auto-parse & compare</div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Upload Panel -->
+  <div class="upload-panel">
+    <div class="panel-title">Upload Schedule Files</div>
+    <div class="upload-slots">
+      <label class="slot" id="slot1" ondragover="ev(event)" ondrop="drop(event,1)">
+        <input type="file" id="file1" accept=".pptx" onchange="handleFile(1)">
+        <div class="slot-icon" id="icon1">📄</div>
+        <div class="slot-label">File A</div>
+        <div id="name1" class="slot-name hidden"></div>
+        <div id="hint1" class="slot-hint">Click or drag .pptx here</div>
+        <div id="status1" class="slot-status hidden"></div>
+      </label>
+      <label class="slot" id="slot2" ondragover="ev(event)" ondrop="drop(event,2)">
+        <input type="file" id="file2" accept=".pptx" onchange="handleFile(2)">
+        <div class="slot-icon" id="icon2">📄</div>
+        <div class="slot-label">File B (optional)</div>
+        <div id="name2" class="slot-name hidden"></div>
+        <div id="hint2" class="slot-hint">For comparison</div>
+        <div id="status2" class="slot-status hidden"></div>
+      </label>
+    </div>
+    <div class="name-row">
+      <div class="name-field">
+        <label>File A name</label>
+        <input type="text" id="nameA" placeholder="e.g. Wistron" value="File A">
+      </div>
+      <div class="name-field">
+        <label>File B name</label>
+        <input type="text" id="nameB" placeholder="e.g. HQ" value="File B">
+      </div>
+    </div>
+    <button class="parse-btn" id="parseBtn" onclick="parseSchedules()" disabled>
+      <span>✨</span> Parse & Generate Gantt Chart
+    </button>
+  </div>
+
+  <!-- Status -->
+  <div class="status-bar hidden" id="statusBar">
+    <div class="status-spinner"></div>
+    <span id="statusText">Parsing schedules with AI...</span>
+  </div>
+
+  <!-- Gantt Output -->
+  <div id="ganttOutput"></div>
+</div>
+
+<script>
+const state = { files: {1: null, 2: null}, texts: {1: '', 2: ''}, parsed: {1: null, 2: null}, view: 'gantt' };
+
+// ── File handling ──────────────────────────────────────────────
+function ev(e) { e.preventDefault(); }
+function drop(e, n) {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pptx')) loadFile(n, f);
+}
+function handleFile(n) {
+  const f = document.getElementById('file'+n).files[0];
+  if (f) loadFile(n, f);
+}
+async function loadFile(n, f) {
+  state.files[n] = f;
+  document.getElementById('slot'+n).classList.add('loading');
+  document.getElementById('icon'+n).textContent = '⏳';
+  document.getElementById('hint'+n).classList.add('hidden');
+  document.getElementById('status'+n).textContent = 'Extracting text...';
+  document.getElementById('status'+n).classList.remove('hidden');
+
+  try {
+    const text = await extractPptxText(f);
+    state.texts[n] = text;
+    document.getElementById('slot'+n).classList.remove('loading');
+    document.getElementById('slot'+n).classList.add('loaded');
+    document.getElementById('icon'+n).textContent = '✅';
+    document.getElementById('name'+n).textContent = f.name;
+    document.getElementById('name'+n).classList.remove('hidden');
+    document.getElementById('status'+n).textContent = `${text.length} chars extracted`;
+    checkReady();
+  } catch(err) {
+    document.getElementById('slot'+n).classList.remove('loading');
+    document.getElementById('status'+n).textContent = 'Error: ' + err.message;
+  }
+}
+
+// ── Extract text from PPTX ────────────────────────────────────
+async function extractPptxText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const zip = await loadZip(e.target.result);
+        let text = '';
+        const slideFiles = Object.keys(zip).filter(k => k.match(/ppt\/slides\/slide\d+\.xml$/)).sort();
+        for (const sf of slideFiles) {
+          const xml = await readZipEntry(zip[sf]);
+          const plain = xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          text += plain + '\n\n';
+        }
+        resolve(text.slice(0, 20000));
+      } catch(err) { reject(err); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function loadZip(buffer) {
+  // Simple ZIP parser to extract XML content
+  const uint8 = new Uint8Array(buffer);
+  const files = {};
+  let i = 0;
+  while (i < uint8.length - 4) {
+    if (uint8[i]===0x50 && uint8[i+1]===0x4B && uint8[i+2]===0x03 && uint8[i+3]===0x04) {
+      const nameLen = uint8[i+26] | (uint8[i+27] << 8);
+      const extraLen = uint8[i+28] | (uint8[i+29] << 8);
+      const compSize = uint8[i+18] | (uint8[i+19]<<8) | (uint8[i+20]<<16) | (uint8[i+21]<<24);
+      const uncomp = uint8[i+22] | (uint8[i+23]<<8) | (uint8[i+24]<<16) | (uint8[i+25]<<24);
+      const compression = uint8[i+8] | (uint8[i+9]<<8);
+      const nameBytes = uint8.slice(i+30, i+30+nameLen);
+      const name = new TextDecoder().decode(nameBytes);
+      const dataStart = i + 30 + nameLen + extraLen;
+      if (name.match(/ppt\/slides\/slide\d+\.xml$/)) {
+        const compressed = uint8.slice(dataStart, dataStart + compSize);
+        files[name] = { data: compressed, compression, uncompSize: uncomp };
+      }
+      i = dataStart + compSize;
+    } else { i++; }
+  }
+  return files;
+}
+
+async function readZipEntry(entry) {
+  if (entry.compression === 0) {
+    return new TextDecoder().decode(entry.data);
+  }
+  // Deflate
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  const reader = ds.readable.getReader();
+  writer.write(entry.data);
+  writer.close();
+  const chunks = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { out.set(c, offset); offset += c.length; }
+  return new TextDecoder().decode(out);
+}
+
+function checkReady() {
+  document.getElementById('parseBtn').disabled = !state.texts[1];
+}
+
+// ── Parse with Claude API ─────────────────────────────────────
+async function parseSchedules() {
+  const nameA = document.getElementById('nameA').value.trim() || 'File A';
+  const nameB = document.getElementById('nameB').value.trim() || 'File B';
+  setStatus('Parsing schedule with AI...');
+
+  const prompt = buildPrompt(nameA, nameB);
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    const raw = data.content?.[0]?.text || '';
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const json = JSON.parse(clean);
+    state.parsed[1] = json.fileA;
+    state.parsed[2] = json.fileB || null;
+    renderGantt(nameA, nameB);
+    hideStatus();
+  } catch(err) {
+    setStatus('Error: ' + err.message, true);
+  }
+}
+
+function buildPrompt(nameA, nameB) {
+  const hasB = !!state.texts[2];
+  return `You are a hardware project schedule parser. Extract structured milestone data from these PPTX schedule texts.
+
+Return ONLY valid JSON (no markdown, no explanation) in this exact format:
+{
+  "fileA": {
+    "project": "project name",
+    "fcs": "YYYY-MM-DD or null",
+    "phases": [
+      {
+        "name": "phase name (e.g. DB, SI, PV, MV, Design, CPU)",
+        "color": "one of: blue|green|orange|pink|purple|red|gray",
+        "milestones": [
+          { "event": "event name", "date": "YYYY-MM-DD", "endDate": "YYYY-MM-DD or null", "type": "range|point", "critical": true/false }
+        ]
+      }
+    ]
+  },
+  "fileB": null or same structure as fileA
+}
+
+Rules:
+- Parse ALL dates found. Convert "26'4/24" → "2026-04-24", "27'1/29" → "2027-01-29"
+- For ranges like "6/15~7/15", use date as date and endDate
+- type "range" for date spans, "point" for single dates
+- critical: true for RTM, FCS, PR, RTP, Phase Exit dates
+- Group into phases: Design/ME, DB, SI, PV, MV, CPU Supply
+- Color: DB=blue, SI=green, PV=orange, MV=pink, Design=purple, CPU=red
+- If fileB text is empty, return fileB: null
+
+File A (${nameA}):
+${state.texts[1].slice(0, 8000)}
+
+${hasB ? `File B (${nameB}):\n${state.texts[2].slice(0, 8000)}` : 'File B: (none)'}`;
+}
+
+// ── Render Gantt ──────────────────────────────────────────────
+const COLORS = {
+  blue:   { bar:'#B5D4F4', text:'#0C447C', pill:'#e8f2ff', pillText:'#185FA5' },
+  green:  { bar:'#C0DD97', text:'#3B6D11', pill:'#e3f5ef', pillText:'#3B6D11' },
+  orange: { bar:'#FAC775', text:'#633806', pill:'#fef3c7', pillText:'#854F0B' },
+  pink:   { bar:'#F4C0D1', text:'#72243E', pill:'#fbeaf0', pillText:'#993556' },
+  purple: { bar:'#CECBF6', text:'#3C3489', pill:'#ede9fe', pillText:'#534AB7' },
+  red:    { bar:'#F7C1C1', text:'#791F1F', pill:'#fdf0ef', pillText:'#A32D2D' },
+  gray:   { bar:'#D3D1C7', text:'#444441', pill:'#f1efe8', pillText:'#5F5E5A' },
+};
+
+function renderGantt(nameA, nameB) {
+  const pA = state.parsed[1];
+  const pB = state.parsed[2];
+  const hasCompare = !!pB;
+  const view = state.view;
+
+  // Compute date range
+  const allDates = [];
+  for (const p of [pA, pB].filter(Boolean)) {
+    for (const ph of p.phases) {
+      for (const ms of ph.milestones) {
+        if (ms.date) allDates.push(new Date(ms.date));
+        if (ms.endDate) allDates.push(new Date(ms.endDate));
+      }
+    }
+  }
+  if (!allDates.length) return;
+  const minD = new Date(Math.min(...allDates));
+  const maxD = new Date(Math.max(...allDates));
+  minD.setDate(1);
+  maxD.setMonth(maxD.getMonth() + 1, 1);
+
+  const totalMs = maxD - minD;
+  const pct = d => Math.max(0, Math.min(100, (new Date(d) - minD) / totalMs * 100));
+  const today = new Date();
+
+  // Build months
+  const months = [];
+  let cur = new Date(minD);
+  while (cur < maxD) {
+    months.push(new Date(cur));
+    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+  }
+
+  // Build phases merged from both files
+  const phaseMap = new Map();
+  for (const [src, pData] of [[nameA, pA], [nameB, pB]].filter(([,d])=>d)) {
+    for (const ph of pData.phases) {
+      if (!phaseMap.has(ph.name)) phaseMap.set(ph.name, { name: ph.name, color: ph.color, msA: [], msB: [] });
+      const entry = phaseMap.get(ph.name);
+      if (src === nameA) entry.msA = ph.milestones;
+      else entry.msB = ph.milestones;
+    }
+  }
+
+  // Months header
+  const totalMonths = months.length;
+  const monthCols = months.map(m => {
+    const label = m.toLocaleDateString('en', {month:'short'}) + ' ' + String(m.getFullYear()).slice(2);
+    const isNow = m.getMonth() === today.getMonth() && m.getFullYear() === today.getFullYear();
+    const w = (1 / totalMonths * 100).toFixed(2);
+    return `<div class="month-col${isNow?' now':''}" style="width:${w}%">${label}</div>`;
+  }).join('');
+
+  // Today pct
+  const todayPct = pct(today);
+
+  // Build phases HTML
+  let phasesHtml = '';
+  for (const [, phase] of phaseMap) {
+    const c = COLORS[phase.color] || COLORS.gray;
+    const msToShow = view === 'gantt' ? phase.msA : (view === 'compare' ? null : phase.msA);
+
+    // Phase header
+    phasesHtml += `<div class="phase-section">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <span class="phase-expand open">▶</span>
+        <span class="phase-name" style="color:${c.pillText}">${phase.name}</span>
+        <span class="phase-pill" style="background:${c.pill};color:${c.pillText}">${phase.msA.length + phase.msB.length} items</span>
+      </div>
+      <div class="phase-body">`;
+
+    if (view === 'compare' && hasCompare) {
+      // Compare view: show A vs B dates side by side
+      const allEvents = new Map();
+      for (const ms of phase.msA) allEvents.set(ms.event, { a: ms, b: null });
+      for (const ms of phase.msB) {
+        if (allEvents.has(ms.event)) allEvents.get(ms.event).b = ms;
+        else allEvents.set(ms.event, { a: null, b: ms });
+      }
+      for (const [evt, {a, b}] of allEvents) {
+        const dateA = a?.date || null;
+        const dateB = b?.date || null;
+        let diffHtml = '';
+        if (dateA && dateB) {
+          const diff = Math.round((new Date(dateB) - new Date(dateA)) / 86400000);
+          if (diff === 0) diffHtml = `<span class="diff-badge diff-same">same</span>`;
+          else if (diff > 0) diffHtml = `<span class="diff-badge diff-late">B +${diff}d</span>`;
+          else diffHtml = `<span class="diff-badge diff-early">B ${diff}d</span>`;
+        }
+        phasesHtml += `<div class="compare-row">
+          <div class="compare-label">${evt}</div>
+          <div class="compare-dates">
+            <span class="date-a src-a">${dateA ? dateA.slice(5) : '—'}</span>
+            <span style="color:var(--text-3)">→</span>
+            <span class="date-b src-b">${dateB ? dateB.slice(5) : '—'}</span>
+            ${diffHtml}
+          </div>
+        </div>`;
+      }
+    } else {
+      // Gantt view: render bars
+      const msList = view === 'gantt' ? phase.msA : [...phase.msA, ...phase.msB];
+      const seen = new Set();
+      for (const ms of msList) {
+        if (seen.has(ms.event)) continue;
+        seen.add(ms.event);
+        const left = pct(ms.date);
+        const isRange = ms.type === 'range' && ms.endDate;
+        const w = isRange ? Math.max(0.5, pct(ms.endDate) - left) : 0;
+
+        let barHtml = '';
+        if (isRange) {
+          barHtml = `<div class="bar" style="left:${left}%;width:${w}%;background:${c.bar};color:${c.text}" title="${ms.event}: ${ms.date} ~ ${ms.endDate}">${w > 4 ? ms.event : ''}</div>`;
+        } else {
+          barHtml = `<div class="diamond" style="left:${left}%;background:${ms.critical ? '#c0392b' : c.pillText}" data-tip="${ms.event}: ${ms.date}"></div>`;
+        }
+
+        phasesHtml += `<div class="milestone-row">
+          <div class="ms-label" title="${ms.event}">${ms.event}</div>
+          <div class="ms-track">
+            ${todayPct > 0 && todayPct < 100 ? `<div class="today-line" style="left:${todayPct}%"></div>` : ''}
+            ${barHtml}
+          </div>
+        </div>`;
+      }
+    }
+
+    phasesHtml += '</div></div>';
+  }
+
+  const html = `
+    <div class="gantt-panel">
+      <div class="gantt-toolbar">
+        <div>
+          <div class="gantt-project">${pA.project || 'Schedule'}</div>
+          <div class="gantt-meta">${nameA}${pB ? ' vs ' + nameB : ''} · FCS: ${pA.fcs || 'TBD'}${pB && pB.fcs && pB.fcs !== pA.fcs ? ' / ' + pB.fcs : ''}</div>
+        </div>
+        <div class="toolbar-right">
+          <button class="tab-btn${view==='gantt'?' active':''}" onclick="setView('gantt')">Gantt</button>
+          ${hasCompare ? `<button class="tab-btn${view==='compare'?' active':''}" onclick="setView('compare')">Compare</button>` : ''}
+          <button class="tab-btn${view==='list'?' active':''}" onclick="setView('list')">List</button>
+          <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+
+      ${view !== 'list' ? `
+      <div class="gantt-wrap">
+        <div class="gantt-inner">
+          <div class="gantt-months" style="border-bottom:1px solid var(--border)">${monthCols}</div>
+          ${phasesHtml}
+        </div>
+      </div>` : `
+      <div class="ms-list">
+        ${Array.from(phaseMap.values()).map(phase => {
+          const c = COLORS[phase.color] || COLORS.gray;
+          const items = [...phase.msA, ...phase.msB];
+          if (!items.length) return '';
+          return `<div class="ms-card">
+            <div class="ms-card-phase" style="color:${c.pillText}">${phase.name}</div>
+            ${items.slice(0, 20).map(ms => {
+              const dc = new Date(ms.date) < today ? 'past' : ms.critical ? 'critical' : (new Date(ms.date) - today) / 86400000 < 30 ? 'soon' : '';
+              return `<div class="ms-item">
+                <span class="ms-event">${ms.event}</span>
+                <span class="ms-date ${dc}">${ms.date.slice(5)}</span>
+              </div>`;
+            }).join('')}
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>`;
+
+  document.getElementById('ganttOutput').innerHTML = html;
+}
+
+function setView(v) {
+  state.view = v;
+  const nameA = document.getElementById('nameA').value.trim() || 'File A';
+  const nameB = document.getElementById('nameB').value.trim() || 'File B';
+  renderGantt(nameA, nameB);
+}
+
+function togglePhase(header) {
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('.phase-expand');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    arrow.classList.add('open');
+  } else {
+    body.style.display = 'none';
+    arrow.classList.remove('open');
+  }
+}
+
+function exportCSV() {
+  const rows = [['Source', 'Phase', 'Event', 'Date', 'End Date', 'Type', 'Critical']];
+  const nameA = document.getElementById('nameA').value.trim() || 'File A';
+  const nameB = document.getElementById('nameB').value.trim() || 'File B';
+  for (const [src, pData] of [[nameA, state.parsed[1]], [nameB, state.parsed[2]]].filter(([,d])=>d)) {
+    for (const ph of pData.phases) {
+      for (const ms of ph.milestones) {
+        rows.push([src, ph.name, ms.event, ms.date, ms.endDate||'', ms.type, ms.critical?'Yes':'No']);
+      }
+    }
+  }
+  const csv = rows.map(r => r.map(c => `"${(c||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'schedule.csv';
+  a.click();
+}
+
+function setStatus(msg, isErr) {
+  const bar = document.getElementById('statusBar');
+  bar.classList.remove('hidden');
+  bar.style.background = isErr ? 'var(--red-lt)' : 'var(--accent-lt)';
+  bar.style.borderColor = isErr ? '#fca5a5' : '#c0d0ff';
+  bar.style.color = isErr ? 'var(--red)' : 'var(--accent)';
+  const spinner = bar.querySelector('.status-spinner');
+  if (isErr) spinner.style.display = 'none';
+  else spinner.style.display = '';
+  document.getElementById('statusText').textContent = msg;
+}
+function hideStatus() { document.getElementById('statusBar').classList.add('hidden'); }
+</script>
+</body>
+</html>
