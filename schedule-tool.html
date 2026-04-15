@@ -486,7 +486,7 @@ function generate(){
   try{
     S.parsed[1]=parseScheduleText(S.texts[1],nameA);
     S.parsed[2]=S.texts[2]?parseScheduleText(S.texts[2],nameB):null;
-    currentPlatKey='all';
+    currentPlatKey = null; // will be set to first platform in renderSummary
     S.currentCompany = null;
     S.view='summary';
     renderGantt(nameA,nameB);
@@ -677,14 +677,17 @@ function renderSummary(nameA, nameB) {
 
   // All platforms from both files
   const platSet = new Map();
-  // No "All Platforms" chip - just show individual platforms
   for (const p of [pA, pB].filter(Boolean)) {
     for (const pl of (p.platforms||[])) {
       if (!platSet.has(pl.key)) platSet.set(pl.key, pl);
     }
   }
   const platforms = [...platSet.values()];
-  if (!currentPlatKey) currentPlatKey = 'all';
+  // Default to first available platform
+  const platKeys = [...platSet.keys()];
+  if (!currentPlatKey || !platSet.has(currentPlatKey)) {
+    currentPlatKey = platKeys[0] || 'all';
+  }
 
   // Filter milestones by platform
   function getFilteredPhases(pData, platKey) {
@@ -722,7 +725,7 @@ function renderSummary(nameA, nameB) {
   // Exclude CPU Supply from main content (shown in sidebar)
   const allPhases = getFilteredPhases(curData, currentPlatKey);
   const phases = allPhases.filter(ph => ph.name !== 'CPU Supply');
-  const platLabel = platforms.find(p=>p.key===currentPlatKey)?.label || 'All Platforms';
+  const platLabel = platforms.find(p=>p.key===currentPlatKey)?.label || platKeys[0] || '';
 
   // Phase flow arrows
   const phaseNames = curData.phases.map(p=>p.name).filter(n=>n!=='CPU Supply');
@@ -870,6 +873,7 @@ function renderSummary(nameA, nameB) {
 
 window.selectPlatform = function(platKey) {
   currentPlatKey = platKey;
+  if (!currentPlatKey) currentPlatKey = null;
   const nA = document.getElementById('nameA')?.value?.trim()||'File A';
   const nB = document.getElementById('nameB')?.value?.trim()||'File B';
   renderSummary(nA, nB);
