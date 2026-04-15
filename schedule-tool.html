@@ -237,15 +237,14 @@ function normalizeText(txt){
 
 // ── Main parser (rule-based, no API needed) ──────────────────
 const PHASE_DEF = [
-  { name:'Design / ME', color:'purple', kw:[/\bIDME\b/i,/kick.?off/i,/ME design/i,/schematic/i,/layout\b/i,/mockup/i,/\bDFM\b/i,/tooling start/i,/\baward\b/i,/ID lock/i,/DB GO\b/i,/DB layout/i] },
-  { name:'DB',          color:'blue',   kw:[/\bDB SMT\b/i,/\bDB SVTP\b/i,/\bDB test\b/i,/\bBBU\b/i,/bring.?up/i,/DB Gerber/i,/DB Phase Exit/i,/DB pre.?build/i,/DB full.?build/i,/DB build/i] },
-  { name:'SI',          color:'green',  kw:[/\bSI SMT\b/i,/\bSI SVTP\b/i,/\bSI test\b/i,/SI build/i,/\bSI GO\b/i,/SI Gerber/i,/SI Phase Exit/i,/SI pre.?build/i,/SI full.?build/i,/\bSI pre/i] },
-  { name:'PV',          color:'orange', kw:[/\bPV SMT\b/i,/\bPV SVTP\b/i,/\bSVTP\b/i,/\bPVR\b/i,/PV build/i,/\bPV GO\b/i,/PV Gerber/i,/PV Phase Exit/i,/PV pre.?build/i,/PV full.?build/i,/\bPLD\b/,/\bCFZ\b/,/\bSIT PVR\b/i,/\bRTM\b/i] },
-  { name:'MV',          color:'pink',   kw:[/\bMV SMT\b/i,/\bMVR\b/i,/\bMV GO\b/i,/MV build/i,/MV pre.?build/i,/MV full.?build/i,/\bRTP\b/,/\bFCS\b/,/\bNC PR\b/i,/\bVN SMT\b/i,/\bVN FCS\b/i,/\bVN PR\b/i,/\bPR\/RTP\b/i] },
-  { name:'CPU Supply',  color:'red',    kw:[/CPU.*ES\d?/i,/CPU.*QS/i,/CPU.*RTS/i,/NVL.*ETD/i,/WCL.*RTS/i,/PTL.*RTS/i,/Mahua.R/i,/Kalambo.R/i,/Purwa/i,/CPU sample/i,/ES.*ETD/i,/QS.*ETD/i] },
+  { name:'Design / ME', color:'purple', kw:[/\bIDME\b/i,/kick.?off/i,/ME design/i,/schematic/i,/\blayout\b/i,/mockup/i,/\bDFM\b/i,/tooling start/i,/\baward\b/i,/ID lock/i,/DB GO\b/i,/DB layout/i,/CNC Fabrication/i,/mockup review/i] },
+  { name:'DB',          color:'blue',   kw:[/\bDB SMT\b/i,/\bDB SVTP\b/i,/\bDB test\b/i,/\bBBU\b/i,/bring.?up/i,/DB Gerber/i,/DB Phase Exit/i,/DB pre.?build/i,/DB full.?build/i,/DB build/i,/DB G\/O/i,/\bDB GO\b/i] },
+  { name:'SI',          color:'green',  kw:[/\bSI SMT\b/i,/\bSI SVTP\b/i,/\bSI test\b/i,/SI build/i,/\bSI G\/O\b/i,/\bSI GO\b/i,/SI Gerber/i,/SI Phase Exit/i,/SI pre.?build/i,/SI full.?build/i,/SI Pre Build/i,/SI Full Build/i] },
+  { name:'PV',          color:'orange', kw:[/\bPV SMT\b/i,/\bPV SVTP\b/i,/\bSVTP\b/i,/\bPVR\b/i,/PV build/i,/\bPV G\/O\b/i,/\bPV GO\b/i,/PV Gerber/i,/PV Phase Exit/i,/PV pre.?build/i,/PV Pre-Build/i,/PV Full Build/i,/\bPLD\b/,/\bCFZ\b/,/\bSIT PVR\b/i,/\bRTM\b/,/SW PVR/i,/PVR material/i] },
+  { name:'MV',          color:'pink',   kw:[/\bMV SMT\b/i,/\bMVR\b/i,/\bMV GO\b/i,/MV build/i,/MV pre.?build/i,/MV Pre-Build/i,/MV Full Build/i,/\bRTP\b/,/\bFCS\b/,/\bNC PR\b/i,/\bVN SMT\b/i,/\bVN FCS\b/i,/\bVN PR\b/i,/PR\/RTP/i,/MV Gerber/i,/VN Full build/i,/VN GS\b/i] },
+  { name:'CPU Supply',  color:'red',    kw:[/\bES\d?\b.*ETD/i,/\bQS\b.*ETD/i,/CPU.*RTS/i,/NVL.*ETD/i,/WCL.*RTS/i,/PTL.*RTS/i,/WCL QS/i,/WCL Prod/i,/NVL ES/i,/NVL QS/i,/NVL Prod/i] },
 ];
 
-// Skip lines that are clearly not milestones
 function isNoiseLine(line) {
   return /^conditions?:/i.test(line) ||
          /^note[s]?:/i.test(line) ||
@@ -253,26 +252,62 @@ function isNoiseLine(line) {
          /^china.*holiday/i.test(line) ||
          /^private.*confidential/i.test(line) ||
          /^assume/i.test(line) ||
-         /^for\s+(the|mv|pv|si|db)\s+phase/i.test(line) ||
-         /^need\s+high/i.test(line) ||
-         /^a-cover/i.test(line) ||
-         /^idme\/dds/i.test(line) ||
-         /^hp review/i.test(line) ||
-         /^resin/i.test(line) ||
+         /^lunar new year/i.test(line) ||
+         /^qingming/i.test(line) ||
+         /^dragon boat/i.test(line) ||
+         /^mid-year/i.test(line) ||
+         /^mid-autumn/i.test(line) ||
+         /^year-end/i.test(line) ||
+         /^new year:/i.test(line) ||
+         /^international labor/i.test(line) ||
+         /^taiwan national/i.test(line) ||
+         /idme.*must.*before/i.test(line) ||
+         /hp review.*should/i.test(line) ||
+         /resin.*paint/i.test(line) ||
          /npi pm:/i.test(line) ||
-         line.length > 120;
+         /^vv$/i.test(line) ||
+         line.length > 100;
+}
+
+// Infer year from month: Apr-Dec = 2026, Jan-Mar = 2027
+function inferYear(month) {
+  const m = parseInt(month);
+  return m >= 4 ? 2026 : 2027;
 }
 
 function extractDates(line) {
   const dates = [];
-  const re = /(?:(\d{2})\'(\d{1,2})\/(\d{1,2})|20(\d{2})\/(\d{1,2})\/(\d{1,2}))/g;
+
+  // Format 1: YY'M/D or YY\u2019M/D  e.g. "26'4/24" or "27\u20191/29"
+  const re1 = /(\d{2})['\u2019\u2018](\d{1,2})\/(\d{1,2})/g;
   let m;
-  while ((m = re.exec(line)) !== null) {
-    let d = m[1]
-      ? `20${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
-      : `20${m[4]}-${m[5].padStart(2,'0')}-${m[6].padStart(2,'0')}`;
+  while ((m = re1.exec(line)) !== null) {
+    const d = `20${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
     if (!dates.includes(d)) dates.push(d);
   }
+
+  // Format 2: YYYY/M/D  e.g. "2027/1/21"
+  const re2 = /\b(202[67])\/(\d{1,2})\/(\d{1,2})\b/g;
+  while ((m = re2.exec(line)) !== null) {
+    const d = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+    if (!dates.includes(d)) dates.push(d);
+  }
+
+  // Format 3: M/D (no year) e.g. "6/15", "12/4", "1/4"
+  // Only if no year-prefixed dates already found
+  if (dates.length === 0) {
+    const re3 = /\b(\d{1,2})\/(\d{1,2})\b/g;
+    while ((m = re3.exec(line)) !== null) {
+      const mo = parseInt(m[1]), dy = parseInt(m[2]);
+      // Sanity check: valid month/day
+      if (mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+        const yr = inferYear(mo);
+        const d = `${yr}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+        if (!dates.includes(d)) dates.push(d);
+      }
+    }
+  }
+
   return dates;
 }
 
@@ -284,14 +319,22 @@ function getPhase(line) {
 }
 
 function cleanEvent(line) {
-  // Remove dates
-  let s = line.replace(/(?:\d{2}\'|\d{4}\/)\d{1,2}\/\d{1,2}(?:[~\-](?:\d{2}\'|\d{4}\/)\d{1,2}\/\d{1,2})?/g, '');
-  // Remove duration tokens like "(4wks)", "4W+3D", "(21 days)"
-  s = s.replace(/\(\d+\s*(?:wks?|days?|weeks?)\)/gi, '');
-  s = s.replace(/\d+\s*w(?:ks?)?(?:\+\d+d?)?/gi, '');
-  // Remove leading/trailing symbols
-  s = s.replace(/^[=\-~\s>:]+|[=\-~\s>:]+$/g, '').replace(/\s+/g, ' ').trim();
-  if (s.length > 60) s = s.slice(0, 57) + '...';
+  let s = line
+    // Remove YY'M/D dates
+    .replace(/\d{2}['\u2019\u2018]\d{1,2}\/\d{1,2}/g, '')
+    // Remove YYYY/M/D dates
+    .replace(/202[67]\/\d{1,2}\/\d{1,2}/g, '')
+    // Remove standalone M/D ranges like "6/15~7/28" or "6/15-7/28"
+    .replace(/\d{1,2}\/\d{1,2}[~\-]\d{1,2}\/\d{1,2}/g, '')
+    // Remove remaining M/D tokens
+    .replace(/\b\d{1,2}\/\d{1,2}\b/g, '')
+    // Remove duration tokens
+    .replace(/\(\d+\.?\d*\s*(?:wks?|days?|weeks?)\)/gi, '')
+    .replace(/\d+\.?\d*\s*w(?:ks?)?\b/gi, '')
+    // Remove separators
+    .replace(/^[=\-~\s>:()+]+|[=\-~\s>:()+]+$/g, '')
+    .replace(/\s+/g, ' ').trim();
+  if (s.length > 55) s = s.slice(0, 52) + '...';
   return s || line.slice(0, 40).trim();
 }
 
@@ -299,9 +342,35 @@ function isCritical(line) {
   return /\bFCS\b|\bRTM\b|\bRTP\b|\/RTP|Phase Exit|\bPLD\b|\bCFZ\b/i.test(line);
 }
 
+// Join consecutive short text fragments that form one milestone
+function joinFragments(lines) {
+  const result = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // If next line has no date and is very short, might be continuation
+    const next = lines[i+1] || '';
+    const hasDates = extractDates(line).length > 0;
+    const nextHasDates = extractDates(next).length > 0;
+    // If current has date and next is label-only (short, no date), merge
+    if (hasDates && next && !nextHasDates && next.length < 20 && !isNoiseLine(next)) {
+      result.push(line + ' ' + next);
+      i += 2;
+    } else {
+      result.push(line);
+      i++;
+    }
+  }
+  return result;
+}
+
 function parseScheduleText(txt, srcName) {
-  txt = txt.replace(/[\u2019\u2018\u201c\u201d]/g, "'").replace(/\u000b/g, ' ');
-  const lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+  txt = txt.replace(/[\u2019\u2018\u201c\u201d\u2032\u02bc]/g, "'")
+           .replace(/\u000b/g, ' ')
+           .replace(/\r/g, '');
+
+  let lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  lines = joinFragments(lines);
 
   const phaseMap = new Map();
   for (const ph of PHASE_DEF) phaseMap.set(ph.name, { ...ph, milestones: [] });
@@ -309,9 +378,11 @@ function parseScheduleText(txt, srcName) {
   let projectName = '', fcsDate = null;
 
   for (const line of lines) {
-    if (!projectName && /schedule/i.test(line) && /\d{4}/.test(line) && line.length < 100) {
+    // Project name
+    if (!projectName && /milestone|schedule/i.test(line) && line.length < 100 && /\d/.test(line)) {
       projectName = line.replace(/private\/confidential/gi,'').trim().slice(0,80);
     }
+    // FCS
     if (!fcsDate && /\bFCS\b/i.test(line)) {
       const ds = extractDates(line);
       if (ds.length) fcsDate = ds[0];
@@ -326,9 +397,8 @@ function parseScheduleText(txt, srcName) {
     if (!ph) continue;
 
     const eventName = cleanEvent(line);
-    if (!eventName || eventName.length < 3) continue;
-    // Skip if event looks like noise
-    if (/^conditions?$/i.test(eventName) || /^note/i.test(eventName)) continue;
+    if (!eventName || eventName.length < 2) continue;
+    if (/^conditions?$/i.test(eventName)) continue;
 
     const type = dates.length >= 2 ? 'range' : 'point';
     const entry = {
