@@ -383,202 +383,211 @@ const COLORS={
   gray:  {bar:'#D3D1C7',text:'#444441',pill:'#f1efe8',pillText:'#5F5E5A'},
 };
 
-// ── Render ─────────────────────────────────────────────────────
-function renderGantt(nameA,nameB){
-  const pA=S.parsed[1],pB=S.parsed[2];
-  const hasB=!!pB;
-  const today=new Date();
+// ── Render ────────────────────────────────────────────────────
+function renderGantt(nameA, nameB) {
+  const pA = S.parsed[1], pB = S.parsed[2];
+  const hasB = !!pB;
+  const today = new Date();
 
-  // Date range
-  const allDates=[];
-  for(const p of [pA,pB].filter(Boolean))
-    for(const ph of p.phases)
-      for(const ms of ph.milestones){
-        if(ms.date)allDates.push(new Date(ms.date));
-        if(ms.endDate)allDates.push(new Date(ms.endDate));
+  // Compute overall date range across both files
+  const allDates = [];
+  for (const p of [pA, pB].filter(Boolean))
+    for (const ph of p.phases)
+      for (const ms of ph.milestones) {
+        if (ms.date) allDates.push(new Date(ms.date));
+        if (ms.endDate) allDates.push(new Date(ms.endDate));
       }
-  if(!allDates.length){document.getElementById('output').innerHTML='<p style="padding:20px;color:var(--text-3)">No dates found in the files.</p>';return}
+  if (!allDates.length) { document.getElementById('output').innerHTML='<p style="padding:20px;color:var(--text-3)">No dates found.</p>'; return; }
 
-  const minD=new Date(Math.min(...allDates));minD.setDate(1);
-  const maxD=new Date(Math.max(...allDates));maxD.setMonth(maxD.getMonth()+1,1);
-  const total=maxD-minD;
-  const pct=d=>Math.max(0,Math.min(100,(new Date(d)-minD)/total*100));
+  const minD = new Date(Math.min(...allDates)); minD.setDate(1);
+  const maxD = new Date(Math.max(...allDates)); maxD.setMonth(maxD.getMonth()+1, 1);
+  const total = maxD - minD;
+  const pct = d => Math.max(0, Math.min(100, (new Date(d) - minD) / total * 100));
+  const todayPct = pct(today);
+  const todayLine = todayPct > 0 && todayPct < 100
+    ? `<div class="today-line" style="left:${todayPct}%"></div>` : '';
 
-  // Months
-  const months=[];let cur=new Date(minD);
-  while(cur<maxD){months.push(new Date(cur));cur=new Date(cur.getFullYear(),cur.getMonth()+1,1)}
-
-  // Merge phases
-  const phaseMap=new Map();
-  for(const [src,pData] of [[nameA,pA],[nameB,pB]].filter(([,d])=>d)){
-    for(const ph of pData.phases){
-      if(!phaseMap.has(ph.name))phaseMap.set(ph.name,{name:ph.name,color:ph.color,msA:[],msB:[]});
-      const e=phaseMap.get(ph.name);
-      if(src===nameA)e.msA=ph.milestones;else e.msB=ph.milestones;
-    }
-  }
-
-  const monthCols=months.map(m=>{
-    const lbl=m.toLocaleDateString('en',{month:'short'})+' '+String(m.getFullYear()).slice(2);
-    const isNow=m.getMonth()===today.getMonth()&&m.getFullYear()===today.getFullYear();
-    const w=(1/months.length*100).toFixed(2);
-    return`<div class="month-col${isNow?' now':''}" style="width:${w}%">${lbl}</div>`;
+  // Months header
+  const months = [];
+  let cur = new Date(minD);
+  while (cur < maxD) { months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1); }
+  const monthCols = months.map(m => {
+    const lbl = m.toLocaleDateString('en',{month:'short'}) + ' ' + String(m.getFullYear()).slice(2);
+    const isNow = m.getMonth()===today.getMonth() && m.getFullYear()===today.getFullYear();
+    const w = (1/months.length*100).toFixed(2);
+    return `<div class="month-col${isNow?' now':''}" style="width:${w}%">${lbl}</div>`;
   }).join('');
 
-  const todayPct=pct(today);
-  const todayLine=todayPct>0&&todayPct<100?`<div class="today-line" style="left:${todayPct}%"></div>`:'';
+  const legendHtml = Object.entries(COLORS).filter(([k])=>['blue','green','orange','pink','purple','red'].includes(k)).map(([k,v])=>{
+    const name = {blue:'DB',green:'SI',orange:'PV',pink:'MV',purple:'Design',red:'CPU'}[k];
+    return `<div class="legend-item"><div class="legend-dot" style="background:${v.bar}"></div>${name}</div>`;
+  }).join('');
 
-  let phasesHtml='';
-  for(const[,phase] of phaseMap){
-    const c=COLORS[phase.color]||COLORS.gray;
-    const total_items=phase.msA.length+phase.msB.length;
+  // Build one block per file
+  function buildBlock(pData, srcName, colorAccent) {
+    if (!pData) return '';
+    let phasesHtml = '';
+    for (const ph of pData.phases) {
+      const col = COLORS[ph.color] || COLORS.gray;
+      phasesHtml += `<div class="phase-section">
+        <div class="phase-header" onclick="togglePhase(this)">
+          <span class="phase-arrow open">▶</span>
+          <span class="phase-name" style="color:${col.pillText}">${ph.name}</span>
+          <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${ph.milestones.length} items</span>
+        </div>
+        <div class="phase-body">`;
 
-    phasesHtml+=`<div class="phase-section">
-      <div class="phase-header" onclick="togglePhase(this)">
-        <span class="phase-arrow open">▶</span>
-        <span class="phase-name" style="color:${c.pillText}">${phase.name}</span>
-        <span class="phase-pill" style="background:${c.pill};color:${c.pillText}">${total_items} items</span>
-      </div>
-      <div class="phase-body">`;
-
-    if(S.view==='compare'&&hasB){
-      const allEvts=new Map();
-      for(const ms of phase.msA)allEvts.set(ms.event,{a:ms,b:null});
-      for(const ms of phase.msB){
-        if(allEvts.has(ms.event))allEvts.get(ms.event).b=ms;
-        else allEvts.set(ms.event,{a:null,b:ms});
-      }
-      for(const[evt,{a,b}] of allEvts){
-        const dA=a?.date||null,dB=b?.date||null;
-        let diffHtml='';
-        if(dA&&dB){
-          const diff=Math.round((new Date(dB)-new Date(dA))/86400000);
-          if(diff===0)diffHtml=`<span class="diff-badge diff-same">same</span>`;
-          else if(diff>0)diffHtml=`<span class="diff-badge diff-late">B +${diff}d</span>`;
-          else diffHtml=`<span class="diff-badge diff-early">B ${diff}d</span>`;
-        }
-        phasesHtml+=`<div class="compare-row">
-          <div class="compare-label" title="${evt}">${evt}</div>
-          <div class="compare-dates">
-            <span class="date-a">${nameA}: ${dA?dA.slice(5):'—'}</span>
-            <span style="color:var(--text-3)">vs</span>
-            <span class="date-b">${nameB}: ${dB?dB.slice(5):'—'}</span>
-            ${diffHtml}
-          </div>
+      for (const ms of ph.milestones) {
+        const left = pct(ms.date);
+        const isRange = ms.type === 'range' && ms.endDate;
+        const w = isRange ? Math.max(0.8, pct(ms.endDate) - left) : 0;
+        const barHtml = isRange
+          ? `<div class="bar" style="left:${left}%;width:${w}%;background:${col.bar};color:${col.text}" title="${ms.event}: ${ms.date}~${ms.endDate}">${w > 5 ? ms.event : ''}</div>`
+          : `<div class="diamond" style="left:${left}%;background:${ms.critical?'#c0392b':col.pillText}" title="${ms.event}: ${ms.date}"></div>`;
+        phasesHtml += `<div class="milestone-row">
+          <div class="ms-label" title="${ms.event}">${ms.event}</div>
+          <div class="ms-track">${todayLine}${barHtml}</div>
         </div>`;
       }
-    } else {
-      // In gantt view: show A and B in same row if same event, else separate rows
-      if(S.view==='gantt'){
-        // Build merged row list: match by event name
-        const mapB=new Map(phase.msB.map(m=>[m.event,m]));
-        const shownB=new Set();
-        for(const msA of phase.msA){
-          const msB=mapB.get(msA.event);
-          shownB.add(msA.event);
-          const leftA=pct(msA.date);
-          const wA=msA.type==='range'&&msA.endDate?Math.max(0.5,pct(msA.endDate)-leftA):0;
-          const barA=wA>0
-            ?`<div class="bar" style="left:${leftA}%;width:${wA}%;background:${c.bar};color:${c.text};top:4px" title="${nameA}: ${msA.event} ${msA.date}~${msA.endDate}">${wA>4?msA.event:''}</div>`
-            :`<div class="diamond" style="left:${leftA}%;background:${msA.critical?'#c0392b':c.pillText};top:7px" title="${nameA}: ${msA.event} ${msA.date}"></div>`;
-          let barB='';
-          if(msB){
-            const leftB=pct(msB.date);
-            const wB=msB.type==='range'&&msB.endDate?Math.max(0.5,pct(msB.endDate)-leftB):0;
-            const bColor=hasB?'#34d399':''+c.bar;
-            barB=wB>0
-              ?`<div class="bar" style="left:${leftB}%;width:${wB}%;background:#dcfce7;color:#166534;top:16px;height:12px;font-size:.6rem" title="${nameB}: ${msB.event} ${msB.date}~${msB.endDate}">${wB>4?msB.event:''}</div>`
-              :`<div class="diamond" style="left:${leftB}%;background:#16a34a;top:19px;width:8px;height:8px" title="${nameB}: ${msB.event} ${msB.date}"></div>`;
-          }
-          const rowH=msB?'min-height:42px':'min-height:32px';
-          phasesHtml+=`<div class="milestone-row" style="${rowH}">
-            <div class="ms-label" title="${msA.event}">${msA.event}</div>
-            <div class="ms-track" style="height:${msB?42:32}px">${todayLine}${barA}${barB}</div>
-          </div>`;
-        }
-        // Show B-only rows
-        for(const msB of phase.msB){
-          if(shownB.has(msB.event))continue;
-          const leftB=pct(msB.date);
-          const wB=msB.type==='range'&&msB.endDate?Math.max(0.5,pct(msB.endDate)-leftB):0;
-          const barB=wB>0
-            ?`<div class="bar" style="left:${leftB}%;width:${wB}%;background:#dcfce7;color:#166534;top:7px" title="${nameB}: ${msB.event} ${msB.date}~${msB.endDate}">${wB>4?msB.event:''}</div>`
-            :`<div class="diamond" style="left:${leftB}%;background:#16a34a;top:11px" title="${nameB}: ${msB.event} ${msB.date}"></div>`;
-          phasesHtml+=`<div class="milestone-row" style="background:#f0fdf4">
-            <div class="ms-label" title="${msB.event}" style="color:#16a34a">${msB.event}</div>
-            <div class="ms-track">${todayLine}${barB}</div>
-          </div>`;
-        }
-      } else {
-        const msList=[...phase.msA,...phase.msB];
-        const seen=new Set();
-        for(const ms of msList){
-          if(seen.has(ms.event+ms.date))continue;
-          seen.add(ms.event+ms.date);
-          const left=pct(ms.date);
-          const isRange=ms.type==='range'&&ms.endDate;
-          const w=isRange?Math.max(0.5,pct(ms.endDate)-left):0;
-          const barHtml=isRange
-            ?`<div class="bar" style="left:${left}%;width:${w}%;background:${c.bar};color:${c.text}" title="${ms.event}: ${ms.date}~${ms.endDate}">${w>4?ms.event:''}</div>`
-            :`<div class="diamond" style="left:${left}%;background:${ms.critical?'#c0392b':c.pillText}" title="${ms.event}: ${ms.date}"></div>`;
-          phasesHtml+=`<div class="milestone-row">
-            <div class="ms-label" title="${ms.event}">${ms.event}</div>
-            <div class="ms-track">${todayLine}${barHtml}</div>
-          </div>`;
-        }
-      }
+      phasesHtml += '</div></div>';
     }
-    phasesHtml+='</div></div>';
-  }
 
-  // List view
-  let listHtml='';
-  for(const[,phase] of phaseMap){
-    const c=COLORS[phase.color]||COLORS.gray;
-    const items=[...phase.msA,...phase.msB];
-    if(!items.length)continue;
-    listHtml+=`<div class="ms-card">
-      <div class="ms-card-phase" style="color:${c.pillText}">${phase.name}</div>
-      ${items.map(ms=>{
-        const d=new Date(ms.date);
-        const cls=d<today?'past':ms.critical?'critical':(d-today)/86400000<30?'soon':'';
-        return`<div class="ms-item"><span class="ms-event">${ms.event}</span><span class="ms-date ${cls}">${ms.date.slice(5)}</span></div>`;
-      }).join('')}
-    </div>`;
-  }
-
-  // Legend
-  const legendHtml=Object.entries(COLORS).filter(([k])=>['blue','green','orange','pink','purple','red'].includes(k)).map(([k,v])=>{
-    const name={blue:'DB',green:'SI',orange:'PV',pink:'MV',purple:'Design',red:'CPU'}[k];
-    return`<div class="legend-item"><div class="legend-dot" style="background:${v.bar}"></div>${name}</div>`;
-  }).join('');
-
-  document.getElementById('output').innerHTML=`
-    <div class="gantt-panel">
+    return `<div class="gantt-panel" style="margin-bottom:20px">
       <div class="gantt-toolbar">
         <div>
-          <div class="gantt-project">${pA.project||nameA}</div>
-          <div class="gantt-meta">${nameA}${hasB?' vs '+nameB:''} · FCS: ${pA.fcs||'TBD'}${hasB&&pB.fcs&&pB.fcs!==pA.fcs?' / '+pB.fcs:''}</div>
+          <div class="gantt-project" style="color:${colorAccent}">${srcName}</div>
+          <div class="gantt-meta">${pData.project||srcName} · FCS: ${pData.fcs||'TBD'}</div>
         </div>
         <div class="toolbar-right">
-          <button class="tab-btn${S.view==='gantt'?' active':''}" onclick="switchView('gantt')">Gantt</button>
-          ${hasB?`<button class="tab-btn${S.view==='compare'?' active':''}" onclick="switchView('compare')">Compare</button>`:''}
-          <button class="tab-btn${S.view==='list'?' active':''}" onclick="switchView('list')">List</button>
-          <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+          <button class="tab-btn active" style="color:${colorAccent};border-color:${colorAccent}">${srcName}</button>
         </div>
       </div>
       <div class="legend">${legendHtml}
         <div class="legend-item"><div style="width:10px;height:10px;background:#c0392b;transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>Critical</div>
-        ${hasB?`<span style="width:1px;background:var(--border);height:14px;margin:0 4px"></span>
-        <div class="legend-item"><div style="width:24px;height:10px;background:${COLORS.blue.bar};border-radius:2px"></div>${nameA}</div>
-        <div class="legend-item"><div style="width:24px;height:10px;background:#dcfce7;border:1px solid #16a34a;border-radius:2px"></div>${nameB}</div>`:''}
       </div>
-      ${S.view!=='list'?`
       <div class="gantt-wrap"><div class="gantt-inner">
         <div class="gantt-months">${monthCols}</div>
         ${phasesHtml}
-      </div></div>`:`<div class="ms-list">${listHtml}</div>`}
+      </div></div>
     </div>`;
+  }
+
+  function buildCompare() {
+    if (!pA || !pB) return '';
+    // Collect all phases
+    const phaseNames = [...new Set([...pA.phases.map(p=>p.name), ...pB.phases.map(p=>p.name)])];
+    let rows = '';
+    for (const phName of phaseNames) {
+      const phA = pA.phases.find(p=>p.name===phName);
+      const phB = pB.phases.find(p=>p.name===phName);
+      const col = COLORS[(phA||phB).color] || COLORS.gray;
+      // Merge events
+      const allEvts = new Map();
+      for (const ms of (phA?.milestones||[])) allEvts.set(ms.event, {a:ms, b:null});
+      for (const ms of (phB?.milestones||[])) {
+        if (allEvts.has(ms.event)) allEvts.get(ms.event).b = ms;
+        else allEvts.set(ms.event, {a:null, b:ms});
+      }
+      rows += `<div class="phase-section">
+        <div class="phase-header" onclick="togglePhase(this)">
+          <span class="phase-arrow open">▶</span>
+          <span class="phase-name" style="color:${col.pillText}">${phName}</span>
+          <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${allEvts.size} items</span>
+        </div>
+        <div class="phase-body">`;
+
+      // Column headers
+      rows += `<div class="compare-row" style="background:#fafbfc;font-weight:700;font-size:.7rem;min-height:28px">
+        <div class="compare-label" style="color:var(--text-3)">Milestone</div>
+        <div class="compare-dates">
+          <span style="color:var(--accent);min-width:80px">${nameA}</span>
+          <span style="color:var(--green);min-width:80px">${nameB}</span>
+          <span style="color:var(--amber);min-width:70px">Diff (A→B)</span>
+        </div>
+      </div>`;
+
+      for (const [evt, {a, b}] of allEvts) {
+        const dA = a?.date||null, dB = b?.date||null;
+        let diffHtml = '<span class="diff-badge diff-same">—</span>';
+        if (dA && dB) {
+          const diff = Math.round((new Date(dB)-new Date(dA))/86400000);
+          if (diff===0) diffHtml=`<span class="diff-badge diff-same">same</span>`;
+          else if (diff>0) diffHtml=`<span class="diff-badge diff-late">B +${diff}d</span>`;
+          else diffHtml=`<span class="diff-badge diff-early">B ${diff}d</span>`;
+        } else if (!dA) {
+          diffHtml=`<span class="diff-badge diff-late">${nameB} only</span>`;
+        } else {
+          diffHtml=`<span class="diff-badge diff-early">${nameA} only</span>`;
+        }
+        rows += `<div class="compare-row">
+          <div class="compare-label" title="${evt}">${evt}</div>
+          <div class="compare-dates">
+            <span class="date-a" style="min-width:80px">${dA?dA.slice(5):'—'}</span>
+            <span class="date-b" style="min-width:80px">${dB?dB.slice(5):'—'}</span>
+            ${diffHtml}
+          </div>
+        </div>`;
+      }
+      rows += '</div></div>';
+    }
+
+    return `<div class="gantt-panel" style="margin-bottom:20px">
+      <div class="gantt-toolbar">
+        <div>
+          <div class="gantt-project">Compare: ${nameA} vs ${nameB}</div>
+          <div class="gantt-meta">${nameA} FCS: ${pA.fcs||'TBD'} &nbsp;|&nbsp; ${nameB} FCS: ${pB.fcs||'TBD'}</div>
+        </div>
+      </div>
+      <div>${rows}</div>
+    </div>`;
+  }
+
+  function buildList(pData, srcName) {
+    if (!pData) return '';
+    let cards = '';
+    for (const ph of pData.phases) {
+      const col = COLORS[ph.color]||COLORS.gray;
+      cards += `<div class="ms-card">
+        <div class="ms-card-phase" style="color:${col.pillText}">${ph.name}</div>
+        ${ph.milestones.map(ms=>{
+          const d=new Date(ms.date);
+          const cls=d<today?'past':ms.critical?'critical':(d-today)/86400000<30?'soon':'';
+          return `<div class="ms-item"><span class="ms-event">${ms.event}</span><span class="ms-date ${cls}">${ms.date.slice(5)}</span></div>`;
+        }).join('')}
+      </div>`;
+    }
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:.8rem;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding:0 4px">${srcName}</div>
+      <div class="ms-list">${cards}</div>
+    </div>`;
+  }
+
+  // Top toolbar
+  const toolbar = `<div class="gantt-panel" style="padding:0;margin-bottom:20px">
+    <div class="gantt-toolbar">
+      <div>
+        <div class="gantt-project">${nameA}${hasB?' vs '+nameB:''}</div>
+        <div class="gantt-meta">FCS: ${pA.fcs||'TBD'}${hasB&&pB.fcs?' / '+pB.fcs:''}</div>
+      </div>
+      <div class="toolbar-right">
+        <button class="tab-btn${S.view==='gantt'?' active':''}" onclick="switchView('gantt')">Gantt</button>
+        ${hasB?`<button class="tab-btn${S.view==='compare'?' active':''}" onclick="switchView('compare')">Compare</button>`:''}
+        <button class="tab-btn${S.view==='list'?' active':''}" onclick="switchView('list')">List</button>
+        <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+      </div>
+    </div>
+  </div>`;
+
+  let content = '';
+  if (S.view === 'gantt') {
+    content = buildBlock(pA, nameA, 'var(--accent)') + (hasB ? buildBlock(pB, nameB, 'var(--green)') : '');
+  } else if (S.view === 'compare') {
+    content = buildCompare();
+  } else {
+    content = buildList(pA, nameA) + (hasB ? buildList(pB, nameB) : '');
+  }
+
+  document.getElementById('output').innerHTML = toolbar + content;
 }
 
 function switchView(v){
