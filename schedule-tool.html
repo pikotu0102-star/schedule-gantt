@@ -191,9 +191,16 @@ async function extractPptx(file){
         const keys=Object.keys(files).sort();
         for(const k of keys){
           const xml=await decompress(files[k]);
-          txt+=xml.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim()+'\n\n';
+          // Split on paragraph tags to preserve line structure
+          const paras=xml.split(/<a:p[\s\/]|<a:p>/);
+          for(const para of paras){
+            const ms=[...para.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)];
+            const line=ms.map(m=>m[1]).join('').replace(/\s+/g,' ').trim();
+            if(line.length>1)txt+=line+'\n';
+          }
+          txt+='\n';
         }
-        resolve(txt.slice(0,25000));
+        resolve(txt.slice(0,30000));
       }catch(err){reject(err)}
     };
     r.readAsArrayBuffer(file);
