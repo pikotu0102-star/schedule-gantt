@@ -145,11 +145,47 @@ const S = { texts:{1:'',2:''}, parsed:{1:null,2:null}, view:'gantt' };
 function ev(e){e.preventDefault()}
 function drop(e,n){e.preventDefault();const f=e.dataTransfer.files[0];if(f&&f.name.endsWith('.pptx'))loadFile(n,f)}
 function handleFile(n){const f=document.getElementById('file'+n).files[0];if(f)loadFile(n,f)}
+function detectCompanyName(filename) {
+  const fn = filename.toLowerCase();
+  const companies = [
+    // ODM partners
+    { name:'Wistron',    re:/wistron/i },
+    { name:'Quanta',     re:/quanta/i },
+    { name:'Compal',     re:/compal/i },
+    { name:'Inventec',   re:/inventec/i },
+    { name:'Pegatron',   re:/pegatron/i },
+    { name:'Foxconn',    re:/foxconn|hon hai/i },
+    { name:'Luxshare',   re:/luxshare/i },
+    { name:'LongCheer',  re:/longcheer/i },
+    { name:'Wingtech',   re:/wingtech/i },
+    { name:'Huaqin',     re:/huaqin/i },
+    { name:'HQ',         re:/hq|asia.bay|marina.*dev|dev.*schedule/i },
+    { name:'BYD',        re:/byd/i },
+    { name:'Jabil',      re:/jabil/i },
+    { name:'Flextronics', re:/flextronics|flex/i },
+    { name:'Celestica',  re:/celestica/i },
+    { name:'TPV',        re:/tpv/i },
+  ];
+  for (const co of companies) {
+    if (co.re.test(fn)) return co.name;
+  }
+  // Try to extract from filename: take first meaningful word
+  const clean = filename.replace(/\.(pptx?|xlsx?)$/i,'').replace(/[\d_\-\.]+/g,' ').trim();
+  const words = clean.split(/\s+/).filter(w=>w.length>2);
+  return words[0] || filename.slice(0,20);
+}
+
 async function loadFile(n,f){
   setSlot(n,'loading','⏳','Extracting...');
   try{
     const txt=await extractPptx(f);
     S.texts[n]=txt;
+    // Auto-fill company name
+    const detectedName = detectCompanyName(f.name);
+    const nameInput = document.getElementById('name'+(['','A','B'][n]));
+    if (nameInput && (nameInput.value==='' || nameInput.value==='File '+['','A','B'][n])) {
+      nameInput.value = detectedName;
+    }
     setSlot(n,'done','✅',f.name,`${txt.length} chars`);
     checkReady();
   }catch(e){setSlot(n,'','❌','',e.message)}
