@@ -227,12 +227,31 @@ async function extractPptx(file){
         const keys=Object.keys(files).sort();
         for(const k of keys){
           const xml=await decompress(files[k]);
+
+          // Detect platform + scenario for this slide from its title shape
+          let slidePlat = '';
+          const titleMatch = xml.match(/milestone[\s\S]{0,50}?\(([^)]+)\)/i);
+          if(titleMatch){
+            const raw = titleMatch[1].toLowerCase();
+            const full = titleMatch[0];
+            // Detect scenario suffix
+            const scenMatch = full.match(/w[\/\s]*o?\s*me|scenario\s*\d+/i);
+            const scen = scenMatch ? ' ' + scenMatch[0].replace(/\s+/g,' ').trim() : '';
+            if(/intel.*wcl|wcl.*intel/i.test(raw)) slidePlat = '[Intel WCL'+scen+']';
+            else if(/intel.*ptl|ptl.*intel/i.test(raw)) slidePlat = '[Intel PTL'+scen+']';
+            else if(/intel.*nvl|nvl.*intel/i.test(raw)) slidePlat = '[Intel NVL'+scen+']';
+            else if(/qc|qualcomm/i.test(raw)) slidePlat = '[Qualcomm'+scen+']';
+          }
+
           // Split on paragraph tags to preserve line structure
           const paras=xml.split(/<a:p[\s\/]|<a:p>/);
           for(const para of paras){
             const ms=[...para.matchAll(/<a:t[^>]*>([^<]*)<\/a:t>/g)];
             const line=ms.map(m=>m[1]).join('').replace(/\s+/g,' ').trim();
-            if(line.length>1)txt+=line+'\n';
+            if(line.length>1){
+              // Append platform tag to date lines so parser can use it
+              txt += line + (slidePlat ? ' __PLAT__'+slidePlat : '') + '\n';
+            }
           }
           txt+='\n';
         }
@@ -289,6 +308,7 @@ const PHASE_DEF = [
 ];
 
 function isNoiseLine(line) {
+  line = line.replace(/__PLAT__\[[^\]]+\]/g, '').trim();
   return /^conditions?:/i.test(line) ||
          /^note[s]?:/i.test(line) ||
          /^taiwan.*holiday/i.test(line) ||
@@ -319,6 +339,7 @@ function inferYear(month) {
 }
 
 function extractDates(line) {
+  line = line.replace(/__PLAT__\[[^\]]+\]/g, '');  // Strip platform tag
   const dates = [];
 
   // Format 1: YY'M/D or YY\u2019M/D  e.g. "26'4/24" or "27\u20191/29"
@@ -362,6 +383,11 @@ function getPhase(line) {
 }
 
 function cleanEvent(line) {
+  // Extract and preserve platform tag
+  const platMatch = line.match(/__PLAT__(\[[^\]]+\])/);
+  const platTag = platMatch ? ' ' + platMatch[1] : '';
+  line = line.replace(/__PLAT__\[[^\]]+\]/g, '');
+
   let s = line
     // Remove YY'M/D dates
     .replace(/\d{2}['\u2019\u2018]\d{1,2}\/\d{1,2}/g, '')
@@ -378,8 +404,7 @@ function cleanEvent(line) {
     .replace(/^[=\-~\s>:()+]+|[=\-~\s>:()+]+$/g, '')
     .replace(/\s+/g, ' ').trim();
   if (s.length > 55) s = s.slice(0, 52) + '...';
-  return s || line.slice(0, 40).trim();
-}
+  return (s || line.slice(0, 40).trim()) + platTag;}
 
 function isCritical(line) {
   return /\bFCS\b|\bRTM\b|\bRTP\b|\/RTP|Phase Exit|\bPLD\b|\bCFZ\b/i.test(line);
@@ -466,15 +491,19 @@ function parseScheduleText(txt, srcName) {
   }
 
   // Detect platform variants from project text
-  const platformKW = [
-    { key:'intel_wcl', label:'Intel WCL', re:/intel.*wcl|wcl.*intel/i },
-    { key:'intel_ptl', label:'Intel PTL', re:/intel.*ptl|ptl.*intel/i },
-    { key:'intel_nvl', label:'Intel NVL', re:/intel.*nvl|nvl.*intel/i },
-    { key:'intel_nextgen', label:'Intel Next Gen', re:/next.?gen|mainstream/i },
-    { key:'qcom_main', label:'Qualcomm (Purwa/Mahua/Kalambo)', re:/purwa|mahua|kalambo/i },
-    { key:'qcom_refresh', label:'Qualcomm (Refresh)', re:/mahua.r|kalambo.r|refresh/i },
-  ];
-  const detectedPlatforms = platformKW.filter(p => p.re.test(txt)).map(p => ({key:p.key, label:p.label}));
+  // Detect platforms from __PLAT__ tags in the text
+  const platTagRe = /__PLAT__(\[[^\]]+\])/g;
+  const platTagsFound = new Set();
+  let _m;
+  while((_m = platTagRe.exec(txt)) !== null) platTagsFound.add(_m[1]);
+  
+  const detectedPlatforms = [];
+  if([...platTagsFound].some(t => /Intel WCL/i.test(t))) detectedPlatforms.push({key:'intel_wcl', label:'Intel WCL'});
+  if([...platTagsFound].some(t => /Intel PTL/i.test(t))) detectedPlatforms.push({key:'intel_ptl', label:'Intel PTL'});
+  if([...platTagsFound].some(t => /Intel NVL.*w\/o/i.test(t))) detectedPlatforms.push({key:'intel_nvl_wo', label:'Intel NVL W/O ME'});
+  if([...platTagsFound].some(t => /Intel NVL.*(w\/ me|scenario)/i.test(t))) detectedPlatforms.push({key:'intel_nvl_w', label:'Intel NVL W/ ME'});
+  if([...platTagsFound].some(t => /Intel NVL/i.test(t)) && !detectedPlatforms.find(p=>p.key==='intel_nvl_wo') && !detectedPlatforms.find(p=>p.key==='intel_nvl_w')) detectedPlatforms.push({key:'intel_nvl', label:'Intel NVL'});
+  if([...platTagsFound].some(t => /Qualcomm/i.test(t))) detectedPlatforms.push({key:'qcom', label:'Qualcomm'});
 
   return { project: projectName || srcName, fcs: fcsDate, phases, platforms: detectedPlatforms };
 }
@@ -520,11 +549,12 @@ const PHASE_COLORS_MAP = {
 };
 
 const ALL_PLATFORMS = [
-  { key:'intel_wcl',    label:'Intel WCL',   re:/wcl/i },
-  { key:'intel_ptl',    label:'Intel PTL',   re:/ptl/i },
-  { key:'intel_nvl',    label:'Intel NVL',   re:/nvl/i },
-  { key:'qcom_main',    label:'Qualcomm',    re:/purwa|mahua|kalambo/i },
-  { key:'qcom_refresh', label:'QC Refresh',  re:/mahua.r|kalambo.r|refresh/i },
+  { key:'intel_wcl',    label:'Intel WCL',        re:/\[Intel WCL/i },
+  { key:'intel_ptl',    label:'Intel PTL',        re:/\[Intel PTL/i },
+  { key:'intel_nvl_wo', label:'Intel NVL W/O ME', re:/\[Intel NVL.*w\/o/i },
+  { key:'intel_nvl_w',  label:'Intel NVL W/ ME',  re:/\[Intel NVL.*w\/ me|scenario/i },
+  { key:'intel_nvl',    label:'Intel NVL (All)',   re:/\[Intel NVL/i },
+  { key:'qcom',         label:'Qualcomm',          re:/\[Qualcomm/i },
 ];
 
 let currentPlatKey = 'all';
@@ -695,13 +725,12 @@ function renderSummary(nameA, nameB) {
     for (const ph of pData.phases) {
       const seen = new Set();
       const items = ph.milestones.filter(ms => {
-        // Platform filter
-        if (platKey !== 'all') {
+        // Platform filter using __PLAT__ tags embedded in event name
+        if (platKey && platKey !== 'all') {
           const re = ALL_PLATFORMS.find(p=>p.key===platKey)?.re;
           if (re) {
-            const txt = (ms.event||'').toLowerCase();
-            const hasAny = ALL_PLATFORMS.some(p=>p.re.test(txt));
-            if (!re.test(txt) && hasAny) return false;
+            const hasPlatTag = ms.event.includes('[');
+            if (hasPlatTag && !re.test(ms.event)) return false;
           }
         }
         // Deduplicate: same event + same date = skip
