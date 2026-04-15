@@ -518,12 +518,18 @@ function renderGantt(nameA, nameB) {
         const left = pct(ms.date);
         const isRange = ms.type === 'range' && ms.endDate;
         const w = isRange ? Math.max(0.8, pct(ms.endDate) - left) : 0;
+        const dateLabel = ms.type==='range' && ms.endDate
+          ? ms.date.slice(5) + '~' + ms.endDate.slice(5)
+          : ms.date.slice(5);
         const barHtml = isRange
-          ? `<div class="bar" style="left:${left}%;width:${w}%;background:${col.bar};color:${col.text}" title="${ms.event}: ${ms.date}~${ms.endDate}">${w > 5 ? ms.event : ''}</div>`
-          : `<div class="diamond" style="left:${left}%;background:${ms.critical?'#c0392b':col.pillText}" title="${ms.event}: ${ms.date}"></div>`;
-        phasesHtml += `<div class="milestone-row">
-          <div class="ms-label" title="${ms.event}">${ms.event}</div>
-          <div class="ms-track">${todayLine}${barHtml}</div>
+          ? `<div class="bar" style="left:${left}%;width:${w}%;background:${col.bar};color:${col.text}" title="${ms.event}: ${dateLabel}">${w > 6 ? ms.event : ''}</div>`
+          : `<div style="position:absolute;left:${left}%;top:4px;display:flex;flex-direction:column;align-items:center;transform:translateX(-50%);z-index:3">
+               <div style="width:10px;height:10px;background:${ms.critical?'#c0392b':col.pillText};transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>
+               <div style="font-size:.62rem;color:${ms.critical?'#c0392b':col.pillText};font-family:var(--mono);font-weight:600;white-space:nowrap;margin-top:2px;background:white;padding:0 2px;border-radius:2px">${dateLabel}</div>
+             </div>`;
+        phasesHtml += `<div class="milestone-row" style="min-height:${isRange?32:44}px">
+          <div class="ms-label" title="${ms.event} (${dateLabel})">${ms.event}<span style="display:block;font-size:.65rem;color:var(--text-3);font-family:var(--mono)">${isRange?dateLabel:''}</span></div>
+          <div class="ms-track" style="height:${isRange?32:44}px">${todayLine}${barHtml}</div>
         </div>`;
       }
       phasesHtml += '</div></div>';
