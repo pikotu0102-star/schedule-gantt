@@ -677,7 +677,7 @@ function renderSummary(nameA, nameB) {
 
   // All platforms from both files
   const platSet = new Map();
-  platSet.set('all', { key:'all', label:'All Platforms' });
+  // No "All Platforms" chip - just show individual platforms
   for (const p of [pA, pB].filter(Boolean)) {
     for (const pl of (p.platforms||[])) {
       if (!platSet.has(pl.key)) platSet.set(pl.key, pl);
@@ -690,13 +690,22 @@ function renderSummary(nameA, nameB) {
   function getFilteredPhases(pData, platKey) {
     const result = [];
     for (const ph of pData.phases) {
+      const seen = new Set();
       const items = ph.milestones.filter(ms => {
-        if (platKey === 'all') return true;
-        const re = ALL_PLATFORMS.find(p=>p.key===platKey)?.re;
-        if (!re) return true;
-        const txt = (ms.event||'').toLowerCase();
-        const hasAny = ALL_PLATFORMS.some(p=>p.re.test(txt));
-        return re.test(txt) || !hasAny;
+        // Platform filter
+        if (platKey !== 'all') {
+          const re = ALL_PLATFORMS.find(p=>p.key===platKey)?.re;
+          if (re) {
+            const txt = (ms.event||'').toLowerCase();
+            const hasAny = ALL_PLATFORMS.some(p=>p.re.test(txt));
+            if (!re.test(txt) && hasAny) return false;
+          }
+        }
+        // Deduplicate: same event + same date = skip
+        const key = ms.event.trim().toLowerCase() + '|' + ms.date;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
       if (items.length) result.push({...ph, milestones: items});
     }
@@ -710,7 +719,9 @@ function renderSummary(nameA, nameB) {
     return (d-today)/86400000 < 30 ? 'soon' : '';
   }
 
-  const phases = getFilteredPhases(curData, currentPlatKey);
+  // Exclude CPU Supply from main content (shown in sidebar)
+  const allPhases = getFilteredPhases(curData, currentPlatKey);
+  const phases = allPhases.filter(ph => ph.name !== 'CPU Supply');
   const platLabel = platforms.find(p=>p.key===currentPlatKey)?.label || 'All Platforms';
 
   // Phase flow arrows
@@ -814,6 +825,28 @@ function renderSummary(nameA, nameB) {
       <div style="width:180px;flex-shrink:0;border-right:1px solid var(--border);background:var(--surface2)">
         <div style="padding:10px 20px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);border-bottom:1px solid var(--border)">Company</div>
         ${companySidebar}
+        <!-- CPU Supply section -->
+        ${(() => {
+          const cpuPhase = curData.phases.find(p => p.name === 'CPU Supply');
+          if (!cpuPhase || !cpuPhase.milestones.length) return '';
+          const col = COLORS[cpuPhase.color] || COLORS.red;
+          return `<div>
+            <div style="padding:8px 20px;font-size:.68rem;font-weight:700;text-transform:uppercase;
+              letter-spacing:.08em;color:${col.pillText};border-top:2px solid var(--border);
+              border-bottom:1px solid var(--border);background:${col.pill};margin-top:4px">
+              CPU Supply
+            </div>
+            ${cpuPhase.milestones.map(ms => {
+              const dateStr = ms.type==='range'&&ms.endDate
+                ? ms.date.slice(5)+'→'+ms.endDate.slice(5)
+                : ms.date.slice(5);
+              return `<div style="padding:6px 20px;border-bottom:0.5px solid var(--border);font-size:.72rem">
+                <div style="color:var(--text-2);margin-bottom:1px;line-height:1.3">${ms.event}</div>
+                <div style="font-family:var(--mono);font-size:.68rem;font-weight:600;color:${col.pillText}">${dateStr}</div>
+              </div>`;
+            }).join('')}
+          </div>`;
+        })()}
       </div>` : ''}
 
       <!-- Content -->
