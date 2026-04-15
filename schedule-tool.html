@@ -487,6 +487,7 @@ function generate(){
     S.parsed[1]=parseScheduleText(S.texts[1],nameA);
     S.parsed[2]=S.texts[2]?parseScheduleText(S.texts[2],nameB):null;
     currentPlatKey='all';
+    S.currentCompany = null;
     S.view='summary';
     renderGantt(nameA,nameB);
     document.getElementById('errBar').classList.add('hidden');
@@ -662,19 +663,35 @@ function renderSummary(nameA, nameB) {
   const nameA2 = nameA||'File A', nameB2 = nameB||'File B';
   const today = new Date();
 
-  // Collect all platforms from both files
+  // All companies
+  const companies = [nameA2];
+  if (hasB) companies.push(nameB2);
+  if (!S.currentCompany || !companies.includes(S.currentCompany)) S.currentCompany = companies[0];
+
+  // All platforms from both files
   const platSet = new Map();
-  platSet.set('all', { key:'all', label:'All Platforms' });
+  platSet.set('all', { key:'all', label:'All' });
   for (const p of [pA, pB].filter(Boolean)) {
     for (const pl of (p.platforms||[])) {
       if (!platSet.has(pl.key)) platSet.set(pl.key, pl);
     }
   }
   const platforms = [...platSet.values()];
+  if (!currentPlatKey) currentPlatKey = 'all';
 
-  function getMsForPlat(pData, platKey) {
-    if (!pData) return {};
-    const result = {};
+  // Get current data
+  const curData = S.currentCompany === nameA2 ? pA : pB;
+  if (!curData) return;
+
+  function dateCls(dateStr, critical) {
+    const d = new Date(dateStr);
+    if (d < today) return 'past';
+    if (critical) return 'critical';
+    return (d-today)/86400000 < 30 ? 'soon' : '';
+  }
+
+  function getFilteredPhases(pData, platKey) {
+    const result = [];
     for (const ph of pData.phases) {
       const items = ph.milestones.filter(ms => {
         if (platKey === 'all') return true;
@@ -684,81 +701,81 @@ function renderSummary(nameA, nameB) {
         const hasAny = ALL_PLATFORMS.some(p=>p.re.test(txt));
         return re.test(txt) || !hasAny;
       });
-      if (items.length) result[ph.name] = { color: ph.color, items };
+      if (items.length) result.push({...ph, milestones: items});
     }
     return result;
   }
 
-  function dateCls(dateStr, critical) {
-    const d = new Date(dateStr);
-    if (d < today) return 'past';
-    if (critical) return 'critical';
-    const diff = (d-today)/86400000;
-    return diff < 30 ? 'soon' : '';
-  }
+  const phases = getFilteredPhases(curData, currentPlatKey);
 
-  function buildSummaryCol(pData, srcName, accentColor) {
-    if (!pData) return '';
-    const phData = getMsForPlat(pData, currentPlatKey);
-    const phaseNames = pData.phases.map(p=>p.name).filter(n=>n!=='CPU Supply');
-
-    const phaseFlowHtml = phaseNames.map((name,i) => {
-      const pc = PHASE_COLORS_MAP[name]||{bg:'#888',text:'white'};
-      const isLast = i===phaseNames.length-1;
-      return `<div style="display:flex;align-items:stretch;flex:1;min-width:50px">
-        <div style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.72rem;
-          padding:6px 4px 6px ${i===0?'6px':'14px'};display:flex;align-items:center;justify-content:center;
-          flex:1;clip-path:${isLast?'none':`polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%,${i===0?'0':'8px'} 50%)`};z-index:${10-i}">${name}</div>
-      </div>`;
-    }).join('');
-
-    let phasesHtml = '';
-    for (const [phName, {color, items}] of Object.entries(phData)) {
-      const col = COLORS[color]||COLORS.gray;
-      phasesHtml += `<div style="margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:${col.pill};border-radius:6px;margin-bottom:3px">
-          <div style="width:8px;height:8px;background:${col.pillText};border-radius:2px;flex-shrink:0"></div>
-          <span style="font-size:.72rem;font-weight:700;color:${col.pillText};text-transform:uppercase;letter-spacing:.05em">${phName}</span>
-        </div>
-        ${items.map(ms => {
-          const cls = dateCls(ms.date, ms.critical);
-          const dateStr = ms.type==='range'&&ms.endDate ? ms.date.slice(5)+'~'+ms.endDate.slice(5) : ms.date.slice(5);
-          return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 10px;border-bottom:0.5px solid var(--border);font-size:.75rem">
-            <span style="color:var(--text-2);flex:1;padding-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ms.event}</span>
-            <span style="font-family:var(--mono);font-size:.68rem;font-weight:600;white-space:nowrap;color:${cls==='past'?'var(--text-3)':cls==='critical'?'var(--red)':cls==='soon'?'var(--amber)':'var(--text-1)'};${cls==='past'?'text-decoration:line-through':''}">${dateStr}</span>
-          </div>`;
-        }).join('')}
-      </div>`;
-    }
-
-    return `<div style="flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-        <span style="font-weight:700;font-size:.9rem;color:${accentColor}">${srcName}</span>
-        <span style="font-size:.72rem;color:var(--text-3)">FCS: ${pData.fcs||'TBD'}</span>
-      </div>
-      <div style="display:flex;overflow:hidden;border-bottom:1px solid var(--border)">${phaseFlowHtml}</div>
-      <div style="padding:10px 0;max-height:65vh;overflow-y:auto">${phasesHtml||'<div style="padding:20px;color:var(--text-3);text-align:center">No milestones for this platform</div>'}</div>
+  // Phase flow arrows
+  const phaseNames = curData.phases.map(p=>p.name).filter(n=>n!=='CPU Supply');
+  const phaseFlowHtml = phaseNames.map((name,i) => {
+    const pc = PHASE_COLORS_MAP[name]||{bg:'#888',text:'white'};
+    const isLast = i===phaseNames.length-1;
+    return `<div style="display:flex;align-items:stretch;flex:1;min-width:60px">
+      <div style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.78rem;
+        padding:8px 6px 8px ${i===0?'10px':'18px'};display:flex;align-items:center;justify-content:center;
+        flex:1;clip-path:${isLast?'none':`polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,${i===0?'0':'10px'} 50%)`};z-index:${10-i}"
+      >${name}</div>
     </div>`;
+  }).join('');
+
+  // Build milestone rows
+  let phasesHtml = '';
+  for (const ph of phases) {
+    const col = COLORS[ph.color]||COLORS.gray;
+    phasesHtml += `
+      <div style="margin-bottom:2px">
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 16px;background:${col.pill};position:sticky;top:0;z-index:2">
+          <div style="width:10px;height:10px;background:${col.pillText};border-radius:2px;flex-shrink:0"></div>
+          <span style="font-size:.78rem;font-weight:700;color:${col.pillText};text-transform:uppercase;letter-spacing:.05em">${ph.name}</span>
+          <span style="font-size:.7rem;color:${col.pillText};opacity:.7;margin-left:auto">${ph.milestones.length} items</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          ${ph.milestones.map((ms,i) => {
+            const cls = dateCls(ms.date, ms.critical);
+            const dateStr = ms.type==='range'&&ms.endDate
+              ? ms.date.slice(5)+'  →  '+ms.endDate.slice(5)
+              : ms.date.slice(5);
+            const isEven = i%2===0;
+            const dateColor = cls==='past'?'var(--text-3)':cls==='critical'?'var(--red)':cls==='soon'?'var(--amber)':'var(--text-1)';
+            const strike = cls==='past'?'text-decoration:line-through':'';
+            return `<tr style="background:${isEven?'var(--surface)':'var(--surface2)'}">
+              <td style="padding:6px 16px;font-size:.8rem;color:var(--text-2);width:65%">${ms.event}${ms.critical?` <span style="font-size:.65rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>`:''}</td>
+              <td style="padding:6px 16px;font-family:var(--mono);font-size:.75rem;font-weight:600;text-align:right;color:${dateColor};${strike}">${dateStr}</td>
+            </tr>`;
+          }).join('')}
+        </table>
+      </div>`;
   }
 
   // Platform chips
-  const platChipsHtml = platforms.map((pl,i) =>
-    `<button class="plat-chip${pl.key===currentPlatKey?' active':''}" onclick="selectPlatform('${pl.key}')"
-      style="padding:5px 16px;border-radius:20px;font-size:.78rem;font-weight:600;
+  const platChips = platforms.map(pl =>
+    `<button onclick="selectPlatform('${pl.key}')"
+      style="padding:4px 14px;border-radius:20px;font-size:.75rem;font-weight:600;
       border:1.5px solid ${pl.key===currentPlatKey?'var(--accent)':'var(--border2)'};
       background:${pl.key===currentPlatKey?'var(--accent)':'white'};
       color:${pl.key===currentPlatKey?'white':'var(--text-2)'};
-      cursor:pointer;font-family:var(--sans);transition:all .15s">${pl.label}</button>`
+      cursor:pointer;font-family:var(--sans);transition:all .15s;white-space:nowrap">${pl.label}</button>`
   ).join('');
 
-  const colsHtml = `<div style="display:grid;grid-template-columns:${hasB?'1fr 1fr':'1fr'};gap:16px">
-    ${buildSummaryCol(pA, nameA2, 'var(--accent)')}
-    ${hasB ? buildSummaryCol(pB, nameB2, 'var(--green)') : ''}
-  </div>`;
+  // Company tabs
+  const companyTabs = companies.map((co,i) => {
+    const isActive = co === S.currentCompany;
+    const accent = i===0 ? 'var(--accent)' : 'var(--green)';
+    return `<button onclick="selectCompany('${co}')"
+      style="padding:6px 20px;font-size:.82rem;font-weight:700;border:none;border-bottom:3px solid ${isActive?accent:'transparent'};
+      background:transparent;color:${isActive?accent:'var(--text-3)'};cursor:pointer;font-family:var(--sans);transition:all .15s">${co}</button>`;
+  }).join('');
+
+  const fcsDate = curData.fcs || 'TBD';
+  const platLabel = platforms.find(p=>p.key===currentPlatKey)?.label || 'All';
 
   document.getElementById('output').innerHTML = `
-    <div class="gantt-panel" style="padding:0;margin-bottom:20px">
-      <div class="gantt-toolbar">
+    <!-- Top toolbar -->
+    <div class="gantt-panel" style="padding:0;margin-bottom:0;border-bottom:none;border-radius:var(--r) var(--r) 0 0">
+      <div class="gantt-toolbar" style="padding:12px 20px">
         <div>
           <div class="gantt-project">${nameA2}${hasB?' vs '+nameB2:''}</div>
           <div class="gantt-meta">FCS: ${pA.fcs||'TBD'}${hasB&&pB?.fcs?' / '+pB.fcs:''}</div>
@@ -770,12 +787,48 @@ function renderSummary(nameA, nameB) {
           <button class="export-btn" onclick="exportCSV()">Export CSV</button>
         </div>
       </div>
-      <div style="padding:12px 20px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3)">Platform</span>
-        ${platChipsHtml}
+      <!-- Platform selector -->
+      <div style="padding:8px 20px;background:var(--surface2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);flex-shrink:0">Platform</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${platChips}</div>
       </div>
     </div>
-    ${colsHtml}`;
+
+    <!-- Main content -->
+    <div style="display:grid;grid-template-columns:${hasB?'200px 1fr':'1fr'};min-height:70vh;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--r) var(--r);overflow:hidden">
+
+      ${hasB ? `
+      <!-- Company sidebar -->
+      <div style="border-right:1px solid var(--border);background:var(--surface2);padding:0">
+        <div style="padding:12px 16px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);border-bottom:1px solid var(--border)">Company</div>
+        ${companies.map((co,i) => {
+          const isActive = co === S.currentCompany;
+          const pData = i===0 ? pA : pB;
+          const accent = i===0 ? 'var(--accent)' : 'var(--green)';
+          const fcs = pData?.fcs || 'TBD';
+          return `<div onclick="selectCompany('${co}')" style="padding:14px 16px;cursor:pointer;border-bottom:1px solid var(--border);border-left:3px solid ${isActive?accent:'transparent'};background:${isActive?'var(--surface)':'transparent'};transition:all .15s">
+            <div style="font-weight:700;font-size:.88rem;color:${isActive?accent:'var(--text-2)'}${isActive?'':';opacity:.7'}">${co}</div>
+            <div style="font-size:.7rem;color:var(--text-3);margin-top:2px;font-family:var(--mono)">FCS: ${fcs}</div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+
+      <!-- Content area -->
+      <div style="overflow-y:auto;max-height:80vh">
+        <!-- Phase info bar -->
+        <div style="padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+          <span style="font-weight:700;font-size:.88rem;color:var(--text-1)">${S.currentCompany}</span>
+          <span style="font-size:.75rem;color:var(--text-3)">·</span>
+          <span style="font-size:.75rem;color:var(--text-3)">${platLabel}</span>
+          <span style="font-size:.75rem;color:var(--text-3)">·</span>
+          <span style="font-size:.75rem;color:var(--text-3)">FCS: <strong style="color:var(--red)">${fcsDate}</strong></span>
+        </div>
+        <!-- Phase flow -->
+        <div style="display:flex;overflow:hidden;border-bottom:1px solid var(--border)">${phaseFlowHtml}</div>
+        <!-- Milestones -->
+        ${phasesHtml||'<div style="padding:40px;text-align:center;color:var(--text-3)">No milestones for this platform</div>'}
+      </div>
+    </div>`;
 }
 
 window.selectPlatform = function(platKey) {
@@ -784,6 +837,14 @@ window.selectPlatform = function(platKey) {
   const nB = document.getElementById('nameB')?.value?.trim()||'File B';
   renderSummary(nA, nB);
 };
+
+window.selectCompany = function(name) {
+  S.currentCompany = name;
+  const nA = document.getElementById('nameA')?.value?.trim()||'File A';
+  const nB = document.getElementById('nameB')?.value?.trim()||'File B';
+  renderSummary(nA, nB);
+};
+
 
 // ── Compare View ──────────────────────────────────────────────
 function renderCompareView(nameA, nameB) {
