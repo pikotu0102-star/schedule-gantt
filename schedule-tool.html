@@ -429,7 +429,18 @@ function parseScheduleText(txt, srcName) {
     phases.push({ name: ph.name, color: ph.color, milestones: ph.milestones });
   }
 
-  return { project: projectName || srcName, fcs: fcsDate, phases };
+  // Detect platform variants from project text
+  const platformKW = [
+    { key:'intel_wcl', label:'Intel WCL', re:/intel.*wcl|wcl.*intel/i },
+    { key:'intel_ptl', label:'Intel PTL', re:/intel.*ptl|ptl.*intel/i },
+    { key:'intel_nvl', label:'Intel NVL', re:/intel.*nvl|nvl.*intel/i },
+    { key:'intel_nextgen', label:'Intel Next Gen', re:/next.?gen|mainstream/i },
+    { key:'qcom_main', label:'Qualcomm (Purwa/Mahua/Kalambo)', re:/purwa|mahua|kalambo/i },
+    { key:'qcom_refresh', label:'Qualcomm (Refresh)', re:/mahua.r|kalambo.r|refresh/i },
+  ];
+  const detectedPlatforms = platformKW.filter(p => p.re.test(txt)).map(p => ({key:p.key, label:p.label}));
+
+  return { project: projectName || srcName, fcs: fcsDate, phases, platforms: detectedPlatforms };
 }
 
 // ── Generate Gantt ─────────────────────────────────────────────
@@ -535,17 +546,62 @@ function renderGantt(nameA, nameB) {
       phasesHtml += '</div></div>';
     }
 
-    return `<div class="gantt-panel" style="margin-bottom:20px">
+    // Build phase flow bar (arrow-style like HQ slide)
+    const PHASE_COLORS_MAP = {
+      'Design / ME': {bg:'#534AB7',text:'white'},
+      'DB':          {bg:'#185FA5',text:'white'},
+      'SI':          {bg:'#3B6D11',text:'white'},
+      'PV':          {bg:'#854F0B',text:'white'},
+      'MV':          {bg:'#993556',text:'white'},
+      'CPU Supply':  {bg:'#A32D2D',text:'white'},
+    };
+    const phaseNames = pData.phases.map(p => p.name).filter(n => n !== 'CPU Supply');
+    const phaseFlowHtml = phaseNames.map((name, i) => {
+      const pc = PHASE_COLORS_MAP[name] || {bg:'#888',text:'white'};
+      const isLast = i === phaseNames.length - 1;
+      return `<div style="display:flex;align-items:stretch;flex:1;min-width:80px;position:relative">
+        <div style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.82rem;
+          padding:8px 12px 8px ${i===0?'12px':'20px'};display:flex;align-items:center;
+          justify-content:center;flex:1;clip-path:${isLast?'none':`polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, ${i===0?'0':'12px'} 50%)`};
+          z-index:${10-i}">${name}</div>
+      </div>`;
+    }).join('');
+
+    // Platform selector
+    const platforms = pData.platforms || [];
+    const platSelectorHtml = platforms.length > 0 ? `
+      <div style="padding:8px 16px;background:#fafbfc;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">Platform</span>
+        ${platforms.map((p,i) => `<button onclick="filterPlatform(this,'${srcName}','${p.key}')"
+          class="plat-chip${i===0?' active':''}"
+          style="padding:3px 12px;border-radius:20px;font-size:.72rem;font-weight:600;border:1.5px solid ${i===0?colorAccent:'var(--border2)'};
+          background:${i===0?colorAccent:'white'};color:${i===0?'white':'var(--text-2)'};cursor:pointer;font-family:var(--sans)"
+        >${p.label}</button>`).join('')}
+        <button onclick="filterPlatform(this,'${srcName}','all')"
+          class="plat-chip${platforms.length===0?' active':''}"
+          style="padding:3px 12px;border-radius:20px;font-size:.72rem;font-weight:600;border:1.5px solid var(--border2);
+          background:white;color:var(--text-2);cursor:pointer;font-family:var(--sans)">All</button>
+      </div>` : '';
+
+    return `<div class="gantt-panel" style="margin-bottom:20px" data-src="${srcName}">
       <div class="gantt-toolbar">
         <div>
           <div class="gantt-project" style="color:${colorAccent}">${srcName}</div>
-          <div class="gantt-meta">${pData.project||srcName} · FCS: ${pData.fcs||'TBD'}</div>
+          <div class="gantt-meta">${pData.project.slice(0,80)||srcName} · FCS: ${pData.fcs||'TBD'}</div>
         </div>
         <div class="toolbar-right">
           <button class="tab-btn active" style="color:${colorAccent};border-color:${colorAccent}">${srcName}</button>
         </div>
       </div>
-      <div class="legend">${legendHtml}
+
+      <!-- Phase flow arrows -->
+      <div style="display:flex;padding:0;overflow:hidden;border-bottom:1px solid var(--border)">
+        ${phaseFlowHtml}
+      </div>
+
+      ${platSelectorHtml}
+
+      <div class="legend" style="padding:8px 16px">${legendHtml}
         <div class="legend-item"><div style="width:10px;height:10px;background:#c0392b;transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>Critical</div>
       </div>
       <div class="gantt-wrap"><div class="gantt-inner">
@@ -672,6 +728,38 @@ function renderGantt(nameA, nameB) {
 
   document.getElementById('output').innerHTML = toolbar + content;
 }
+
+window.filterPlatform = function(btn, srcName, platKey) {
+  // Update chip styles
+  const panel = btn.closest('[data-src]');
+  if (!panel) return;
+  panel.querySelectorAll('.plat-chip').forEach(b => {
+    b.style.background = 'white';
+    b.style.color = 'var(--text-2)';
+    b.style.borderColor = 'var(--border2)';
+  });
+  const accentColor = panel.querySelector('.gantt-project')?.style.color || 'var(--accent)';
+  btn.style.background = accentColor;
+  btn.style.color = 'white';
+  btn.style.borderColor = accentColor;
+
+  // Filter rows
+  const rows = panel.querySelectorAll('.milestone-row');
+  rows.forEach(row => {
+    if (platKey === 'all') {
+      row.style.display = '';
+    } else {
+      const label = row.querySelector('.ms-label')?.title?.toLowerCase() || '';
+      const platMap = {
+        intel_wcl: /wcl/i, intel_ptl: /ptl/i, intel_nvl: /nvl/i,
+        intel_nextgen: /next.?gen|mainstream/i,
+        qcom_main: /purwa|mahua|kalambo/i, qcom_refresh: /refresh/i,
+      };
+      const re = platMap[platKey];
+      row.style.display = re && re.test(label) ? '' : 'none';
+    }
+  });
+};
 
 function switchView(v){
   S.view=v;
