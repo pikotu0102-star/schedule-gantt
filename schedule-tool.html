@@ -450,7 +450,8 @@ function generate(){
   try{
     S.parsed[1]=parseScheduleText(S.texts[1],nameA);
     S.parsed[2]=S.texts[2]?parseScheduleText(S.texts[2],nameB):null;
-    S.view='gantt';
+    currentPlatKey='all';
+    S.view='summary';
     renderGantt(nameA,nameB);
     document.getElementById('errBar').classList.add('hidden');
   }catch(e){
@@ -471,13 +472,35 @@ const COLORS={
   gray:  {bar:'#D3D1C7',text:'#444441',pill:'#f1efe8',pillText:'#5F5E5A'},
 };
 
-// ── Render ────────────────────────────────────────────────────
+// ── Render ──────────────────────────────────────────────────
+const PHASE_COLORS_MAP = {
+  'Design / ME': {bg:'#534AB7',text:'white'},
+  'DB':          {bg:'#185FA5',text:'white'},
+  'SI':          {bg:'#3B6D11',text:'white'},
+  'PV':          {bg:'#854F0B',text:'white'},
+  'MV':          {bg:'#993556',text:'white'},
+  'CPU Supply':  {bg:'#A32D2D',text:'white'},
+};
+
+const ALL_PLATFORMS = [
+  { key:'intel_wcl',    label:'Intel WCL',   re:/wcl/i },
+  { key:'intel_ptl',    label:'Intel PTL',   re:/ptl/i },
+  { key:'intel_nvl',    label:'Intel NVL',   re:/nvl/i },
+  { key:'qcom_main',    label:'Qualcomm',    re:/purwa|mahua|kalambo/i },
+  { key:'qcom_refresh', label:'QC Refresh',  re:/mahua.r|kalambo.r|refresh/i },
+];
+
+let currentPlatKey = 'all';
+
 function renderGantt(nameA, nameB) {
   const pA = S.parsed[1], pB = S.parsed[2];
+  if (!pA) return;
+  if (S.view === 'summary') { renderSummary(nameA, nameB); return; }
+  if (S.view === 'compare')  { renderCompareView(nameA, nameB); return; }
+
+  // ── GANTT VIEW ──────────────────────────────────────────────
   const hasB = !!pB;
   const today = new Date();
-
-  // Compute overall date range across both files
   const allDates = [];
   for (const p of [pA, pB].filter(Boolean))
     for (const ph of p.phases)
@@ -492,123 +515,79 @@ function renderGantt(nameA, nameB) {
   const total = maxD - minD;
   const pct = d => Math.max(0, Math.min(100, (new Date(d) - minD) / total * 100));
   const todayPct = pct(today);
-  const todayLine = todayPct > 0 && todayPct < 100
-    ? `<div class="today-line" style="left:${todayPct}%"></div>` : '';
+  const todayLine = todayPct>0&&todayPct<100 ? `<div class="today-line" style="left:${todayPct}%"></div>` : '';
 
-  // Months header
   const months = [];
   let cur = new Date(minD);
   while (cur < maxD) { months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1); }
   const monthCols = months.map(m => {
-    const lbl = m.toLocaleDateString('en',{month:'short'}) + ' ' + String(m.getFullYear()).slice(2);
-    const isNow = m.getMonth()===today.getMonth() && m.getFullYear()===today.getFullYear();
-    const w = (1/months.length*100).toFixed(2);
-    return `<div class="month-col${isNow?' now':''}" style="width:${w}%">${lbl}</div>`;
+    const lbl = m.toLocaleDateString('en',{month:'short'})+' '+String(m.getFullYear()).slice(2);
+    const isNow = m.getMonth()===today.getMonth()&&m.getFullYear()===today.getFullYear();
+    return `<div class="month-col${isNow?' now':''}" style="width:${(1/months.length*100).toFixed(2)}%">${lbl}</div>`;
   }).join('');
 
-  const legendHtml = Object.entries(COLORS).filter(([k])=>['blue','green','orange','pink','purple','red'].includes(k)).map(([k,v])=>{
-    const name = {blue:'DB',green:'SI',orange:'PV',pink:'MV',purple:'Design',red:'CPU'}[k];
-    return `<div class="legend-item"><div class="legend-dot" style="background:${v.bar}"></div>${name}</div>`;
-  }).join('');
-
-  // Build one block per file
-  function buildBlock(pData, srcName, colorAccent) {
+  function buildGanttBlock(pData, srcName, colorAccent) {
     if (!pData) return '';
+    const phaseNames = pData.phases.map(p=>p.name).filter(n=>n!=='CPU Supply');
+    const phaseFlowHtml = phaseNames.map((name,i) => {
+      const pc = PHASE_COLORS_MAP[name]||{bg:'#888',text:'white'};
+      const sid = `phase-${srcName.replace(/\s+/g,'-')}-${name.replace(/[\s\/]+/g,'-')}`;
+      const isLast = i===phaseNames.length-1;
+      return `<div style="display:flex;align-items:stretch;flex:1;min-width:70px">
+        <div onclick="scrollToPhase('${sid}')" title="Jump to ${name}"
+          style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.78rem;
+          padding:7px 8px 7px ${i===0?'8px':'18px'};display:flex;align-items:center;justify-content:center;
+          flex:1;cursor:pointer;transition:filter .15s;
+          clip-path:${isLast?'none':`polygon(0 0,calc(100% - 10px) 0,100% 50%,calc(100% - 10px) 100%,0 100%,${i===0?'0':'10px'} 50%)`};z-index:${10-i}"
+          onmouseover="this.style.filter='brightness(1.2)'" onmouseout="this.style.filter=''">${name}</div>
+      </div>`;
+    }).join('');
+
     let phasesHtml = '';
     for (const ph of pData.phases) {
-      const col = COLORS[ph.color] || COLORS.gray;
-      const sectionId = `phase-${srcName.replace(/\s+/g,'-')}-${ph.name.replace(/\s+/g,'-')}`;
-      phasesHtml += `<div class="phase-section" id="${sectionId}">
+      const col = COLORS[ph.color]||COLORS.gray;
+      const sid = `phase-${srcName.replace(/\s+/g,'-')}-${ph.name.replace(/[\s\/]+/g,'-')}`;
+      phasesHtml += `<div class="phase-section" id="${sid}">
         <div class="phase-header" onclick="togglePhase(this)">
           <span class="phase-arrow open">▶</span>
-          <span class="phase-name" style="color:${col.pillText};cursor:pointer"
-            onclick="event.stopPropagation();scrollToPhase('${sectionId}')"
-            title="Click to focus this phase">${ph.name}</span>
+          <span class="phase-name" style="color:${col.pillText};cursor:pointer" onclick="event.stopPropagation();scrollToPhase('${sid}')">${ph.name}</span>
           <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${ph.milestones.length} items</span>
         </div>
         <div class="phase-body">`;
-
       for (const ms of ph.milestones) {
         const left = pct(ms.date);
-        const isRange = ms.type === 'range' && ms.endDate;
-        const w = isRange ? Math.max(0.8, pct(ms.endDate) - left) : 0;
-        const dateLabel = ms.type==='range' && ms.endDate
-          ? ms.date.slice(5) + '~' + ms.endDate.slice(5)
-          : ms.date.slice(5);
+        const isRange = ms.type==='range'&&ms.endDate;
+        const w = isRange ? Math.max(0.8, pct(ms.endDate)-left) : 0;
+        const dateLabel = isRange ? ms.date.slice(5)+'~'+ms.endDate.slice(5) : ms.date.slice(5);
         const barHtml = isRange
-          ? `<div class="bar" style="left:${left}%;width:${w}%;background:${col.bar};color:${col.text}" title="${ms.event}: ${dateLabel}">${w > 6 ? ms.event : ''}</div>`
-          : `<div style="position:absolute;left:${left}%;top:4px;display:flex;flex-direction:column;align-items:center;transform:translateX(-50%);z-index:3">
-               <div style="width:10px;height:10px;background:${ms.critical?'#c0392b':col.pillText};transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>
-               <div style="font-size:.62rem;color:${ms.critical?'#c0392b':col.pillText};font-family:var(--mono);font-weight:600;white-space:nowrap;margin-top:2px;background:white;padding:0 2px;border-radius:2px">${dateLabel}</div>
+          ? `<div class="bar" style="left:${left}%;width:${w}%;background:${col.bar};color:${col.text}" title="${ms.event}: ${dateLabel}">${w>6?ms.event:''}</div>`
+          : `<div style="position:absolute;left:${left}%;top:3px;display:flex;flex-direction:column;align-items:center;transform:translateX(-50%);z-index:3;pointer-events:none">
+               <div style="width:10px;height:10px;background:${ms.critical?'#c0392b':col.pillText};transform:rotate(45deg);border-radius:1px"></div>
+               <div style="font-size:.6rem;color:${ms.critical?'#c0392b':col.pillText};font-family:var(--mono);font-weight:600;white-space:nowrap;margin-top:1px;background:rgba(255,255,255,.9);padding:0 2px;border-radius:2px">${dateLabel}</div>
              </div>`;
         phasesHtml += `<div class="milestone-row" style="min-height:${isRange?32:44}px">
-          <div class="ms-label" title="${ms.event} (${dateLabel})">${ms.event}<span style="display:block;font-size:.65rem;color:var(--text-3);font-family:var(--mono)">${isRange?dateLabel:''}</span></div>
+          <div class="ms-label" title="${ms.event} (${dateLabel})">${ms.event}
+            <span style="display:block;font-size:.65rem;color:var(--text-3);font-family:var(--mono)">${isRange?dateLabel:''}</span>
+          </div>
           <div class="ms-track" style="height:${isRange?32:44}px">${todayLine}${barHtml}</div>
         </div>`;
       }
       phasesHtml += '</div></div>';
     }
 
-    // Build phase flow bar (arrow-style like HQ slide)
-    const PHASE_COLORS_MAP = {
-      'Design / ME': {bg:'#534AB7',text:'white'},
-      'DB':          {bg:'#185FA5',text:'white'},
-      'SI':          {bg:'#3B6D11',text:'white'},
-      'PV':          {bg:'#854F0B',text:'white'},
-      'MV':          {bg:'#993556',text:'white'},
-      'CPU Supply':  {bg:'#A32D2D',text:'white'},
-    };
-    const phaseNames = pData.phases.map(p => p.name).filter(n => n !== 'CPU Supply');
-    const phaseFlowHtml = phaseNames.map((name, i) => {
-      const pc = PHASE_COLORS_MAP[name] || {bg:'#888',text:'white'};
-      const isLast = i === phaseNames.length - 1;
-      const sectionId = `phase-${srcName.replace(/\s+/g,'-')}-${name.replace(/\s+/g,'-')}`;
-      return `<div style="display:flex;align-items:stretch;flex:1;min-width:80px;position:relative">
-        <div onclick="scrollToPhase('${sectionId}')"
-          style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.82rem;
-          padding:8px 12px 8px ${i===0?'12px':'20px'};display:flex;align-items:center;
-          justify-content:center;flex:1;cursor:pointer;transition:filter .15s;
-          clip-path:${isLast?'none':`polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, ${i===0?'0':'12px'} 50%)`};
-          z-index:${10-i}"
-          onmouseover="this.style.filter='brightness(1.15)'"
-          onmouseout="this.style.filter=''">${name}</div>
-      </div>`;
+    const legendHtml = Object.entries(COLORS).filter(([k])=>['blue','green','orange','pink','purple','red'].includes(k)).map(([k,v])=>{
+      const name={blue:'DB',green:'SI',orange:'PV',pink:'MV',purple:'Design',red:'CPU'}[k];
+      return `<div class="legend-item"><div class="legend-dot" style="background:${v.bar}"></div>${name}</div>`;
     }).join('');
-
-    // Platform selector
-    const platforms = pData.platforms || [];
-    const platSelectorHtml = platforms.length > 0 ? `
-      <div style="padding:8px 16px;background:#fafbfc;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">Platform</span>
-        ${platforms.map((p,i) => `<button onclick="filterPlatform(this,'${srcName}','${p.key}')"
-          class="plat-chip${i===0?' active':''}"
-          style="padding:3px 12px;border-radius:20px;font-size:.72rem;font-weight:600;border:1.5px solid ${i===0?colorAccent:'var(--border2)'};
-          background:${i===0?colorAccent:'white'};color:${i===0?'white':'var(--text-2)'};cursor:pointer;font-family:var(--sans)"
-        >${p.label}</button>`).join('')}
-        <button onclick="filterPlatform(this,'${srcName}','all')"
-          class="plat-chip${platforms.length===0?' active':''}"
-          style="padding:3px 12px;border-radius:20px;font-size:.72rem;font-weight:600;border:1.5px solid var(--border2);
-          background:white;color:var(--text-2);cursor:pointer;font-family:var(--sans)">All</button>
-      </div>` : '';
 
     return `<div class="gantt-panel" style="margin-bottom:20px" data-src="${srcName}">
       <div class="gantt-toolbar">
         <div>
           <div class="gantt-project" style="color:${colorAccent}">${srcName}</div>
-          <div class="gantt-meta">${pData.project.slice(0,80)||srcName} · FCS: ${pData.fcs||'TBD'}</div>
-        </div>
-        <div class="toolbar-right">
-          <button class="tab-btn active" style="color:${colorAccent};border-color:${colorAccent}">${srcName}</button>
+          <div class="gantt-meta">${pData.project.slice(0,80)} · FCS: ${pData.fcs||'TBD'}</div>
         </div>
       </div>
-
-      <!-- Phase flow arrows -->
-      <div style="display:flex;padding:0;overflow:hidden;border-bottom:1px solid var(--border)">
-        ${phaseFlowHtml}
-      </div>
-
-      ${platSelectorHtml}
-
+      <div style="display:flex;overflow:hidden;border-bottom:1px solid var(--border)">${phaseFlowHtml}</div>
       <div class="legend" style="padding:8px 16px">${legendHtml}
         <div class="legend-item"><div style="width:10px;height:10px;background:#c0392b;transform:rotate(45deg);border-radius:1px;flex-shrink:0"></div>Critical</div>
       </div>
@@ -619,122 +598,222 @@ function renderGantt(nameA, nameB) {
     </div>`;
   }
 
-  function buildCompare() {
-    if (!pA || !pB) return '';
-    // Collect all phases
-    const phaseNames = [...new Set([...pA.phases.map(p=>p.name), ...pB.phases.map(p=>p.name)])];
-    let rows = '';
-    for (const phName of phaseNames) {
-      const phA = pA.phases.find(p=>p.name===phName);
-      const phB = pB.phases.find(p=>p.name===phName);
-      const col = COLORS[(phA||phB).color] || COLORS.gray;
-      // Merge events
-      const allEvts = new Map();
-      for (const ms of (phA?.milestones||[])) allEvts.set(ms.event, {a:ms, b:null});
-      for (const ms of (phB?.milestones||[])) {
-        if (allEvts.has(ms.event)) allEvts.get(ms.event).b = ms;
-        else allEvts.set(ms.event, {a:null, b:ms});
-      }
-      rows += `<div class="phase-section">
-        <div class="phase-header" onclick="togglePhase(this)">
-          <span class="phase-arrow open">▶</span>
-          <span class="phase-name" style="color:${col.pillText}">${phName}</span>
-          <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${allEvts.size} items</span>
-        </div>
-        <div class="phase-body">`;
-
-      // Column headers
-      rows += `<div class="compare-row" style="background:#fafbfc;font-weight:700;font-size:.7rem;min-height:28px">
-        <div class="compare-label" style="color:var(--text-3)">Milestone</div>
-        <div class="compare-dates">
-          <span style="color:var(--accent);min-width:80px">${nameA}</span>
-          <span style="color:var(--green);min-width:80px">${nameB}</span>
-          <span style="color:var(--amber);min-width:70px">Diff (A→B)</span>
-        </div>
-      </div>`;
-
-      for (const [evt, {a, b}] of allEvts) {
-        const dA = a?.date||null, dB = b?.date||null;
-        let diffHtml = '<span class="diff-badge diff-same">—</span>';
-        if (dA && dB) {
-          const diff = Math.round((new Date(dB)-new Date(dA))/86400000);
-          if (diff===0) diffHtml=`<span class="diff-badge diff-same">same</span>`;
-          else if (diff>0) diffHtml=`<span class="diff-badge diff-late">B +${diff}d</span>`;
-          else diffHtml=`<span class="diff-badge diff-early">B ${diff}d</span>`;
-        } else if (!dA) {
-          diffHtml=`<span class="diff-badge diff-late">${nameB} only</span>`;
-        } else {
-          diffHtml=`<span class="diff-badge diff-early">${nameA} only</span>`;
-        }
-        rows += `<div class="compare-row">
-          <div class="compare-label" title="${evt}">${evt}</div>
-          <div class="compare-dates">
-            <span class="date-a" style="min-width:80px">${dA?dA.slice(5):'—'}</span>
-            <span class="date-b" style="min-width:80px">${dB?dB.slice(5):'—'}</span>
-            ${diffHtml}
-          </div>
-        </div>`;
-      }
-      rows += '</div></div>';
-    }
-
-    return `<div class="gantt-panel" style="margin-bottom:20px">
-      <div class="gantt-toolbar">
-        <div>
-          <div class="gantt-project">Compare: ${nameA} vs ${nameB}</div>
-          <div class="gantt-meta">${nameA} FCS: ${pA.fcs||'TBD'} &nbsp;|&nbsp; ${nameB} FCS: ${pB.fcs||'TBD'}</div>
-        </div>
-      </div>
-      <div>${rows}</div>
-    </div>`;
-  }
-
-  function buildList(pData, srcName) {
-    if (!pData) return '';
-    let cards = '';
-    for (const ph of pData.phases) {
-      const col = COLORS[ph.color]||COLORS.gray;
-      cards += `<div class="ms-card">
-        <div class="ms-card-phase" style="color:${col.pillText}">${ph.name}</div>
-        ${ph.milestones.map(ms=>{
-          const d=new Date(ms.date);
-          const cls=d<today?'past':ms.critical?'critical':(d-today)/86400000<30?'soon':'';
-          return `<div class="ms-item"><span class="ms-event">${ms.event}</span><span class="ms-date ${cls}">${ms.date.slice(5)}</span></div>`;
-        }).join('')}
-      </div>`;
-    }
-    return `<div style="margin-bottom:20px">
-      <div style="font-size:.8rem;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;padding:0 4px">${srcName}</div>
-      <div class="ms-list">${cards}</div>
-    </div>`;
-  }
-
-  // Top toolbar
-  const toolbar = `<div class="gantt-panel" style="padding:0;margin-bottom:20px">
+  const nameA2 = nameA||'File A', nameB2 = nameB||'File B';
+  const topToolbar = `<div class="gantt-panel" style="padding:0;margin-bottom:20px">
     <div class="gantt-toolbar">
       <div>
-        <div class="gantt-project">${nameA}${hasB?' vs '+nameB:''}</div>
-        <div class="gantt-meta">FCS: ${pA.fcs||'TBD'}${hasB&&pB.fcs?' / '+pB.fcs:''}</div>
+        <div class="gantt-project">${nameA2}${hasB?' vs '+nameB2:''}</div>
+        <div class="gantt-meta">FCS: ${pA.fcs||'TBD'}${hasB&&pB?.fcs?' / '+pB.fcs:''}</div>
       </div>
       <div class="toolbar-right">
-        <button class="tab-btn${S.view==='gantt'?' active':''}" onclick="switchView('gantt')">Gantt</button>
-        ${hasB?`<button class="tab-btn${S.view==='compare'?' active':''}" onclick="switchView('compare')">Compare</button>`:''}
-        <button class="tab-btn${S.view==='list'?' active':''}" onclick="switchView('list')">List</button>
+        <button class="tab-btn" onclick="switchView('summary')">📋 Summary</button>
+        <button class="tab-btn active" onclick="switchView('gantt')">📊 Gantt</button>
+        ${hasB?`<button class="tab-btn" onclick="switchView('compare')">🔄 Compare</button>`:''}
         <button class="export-btn" onclick="exportCSV()">Export CSV</button>
       </div>
     </div>
   </div>`;
 
-  let content = '';
-  if (S.view === 'gantt') {
-    content = buildBlock(pA, nameA, 'var(--accent)') + (hasB ? buildBlock(pB, nameB, 'var(--green)') : '');
-  } else if (S.view === 'compare') {
-    content = buildCompare();
-  } else {
-    content = buildList(pA, nameA) + (hasB ? buildList(pB, nameB) : '');
+  document.getElementById('output').innerHTML = topToolbar +
+    buildGanttBlock(pA, nameA2, 'var(--accent)') +
+    (hasB ? buildGanttBlock(pB, nameB2, 'var(--green)') : '');
+}
+
+// ── Summary View ─────────────────────────────────────────────
+function renderSummary(nameA, nameB) {
+  const pA = S.parsed[1], pB = S.parsed[2];
+  const hasB = !!pB;
+  const nameA2 = nameA||'File A', nameB2 = nameB||'File B';
+  const today = new Date();
+
+  // Collect all platforms from both files
+  const platSet = new Map();
+  platSet.set('all', { key:'all', label:'All Platforms' });
+  for (const p of [pA, pB].filter(Boolean)) {
+    for (const pl of (p.platforms||[])) {
+      if (!platSet.has(pl.key)) platSet.set(pl.key, pl);
+    }
+  }
+  const platforms = [...platSet.values()];
+
+  function getMsForPlat(pData, platKey) {
+    if (!pData) return {};
+    const result = {};
+    for (const ph of pData.phases) {
+      const items = ph.milestones.filter(ms => {
+        if (platKey === 'all') return true;
+        const re = ALL_PLATFORMS.find(p=>p.key===platKey)?.re;
+        if (!re) return true;
+        const txt = (ms.event||'').toLowerCase();
+        const hasAny = ALL_PLATFORMS.some(p=>p.re.test(txt));
+        return re.test(txt) || !hasAny;
+      });
+      if (items.length) result[ph.name] = { color: ph.color, items };
+    }
+    return result;
   }
 
-  document.getElementById('output').innerHTML = toolbar + content;
+  function dateCls(dateStr, critical) {
+    const d = new Date(dateStr);
+    if (d < today) return 'past';
+    if (critical) return 'critical';
+    const diff = (d-today)/86400000;
+    return diff < 30 ? 'soon' : '';
+  }
+
+  function buildSummaryCol(pData, srcName, accentColor) {
+    if (!pData) return '';
+    const phData = getMsForPlat(pData, currentPlatKey);
+    const phaseNames = pData.phases.map(p=>p.name).filter(n=>n!=='CPU Supply');
+
+    const phaseFlowHtml = phaseNames.map((name,i) => {
+      const pc = PHASE_COLORS_MAP[name]||{bg:'#888',text:'white'};
+      const isLast = i===phaseNames.length-1;
+      return `<div style="display:flex;align-items:stretch;flex:1;min-width:50px">
+        <div style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.72rem;
+          padding:6px 4px 6px ${i===0?'6px':'14px'};display:flex;align-items:center;justify-content:center;
+          flex:1;clip-path:${isLast?'none':`polygon(0 0,calc(100% - 8px) 0,100% 50%,calc(100% - 8px) 100%,0 100%,${i===0?'0':'8px'} 50%)`};z-index:${10-i}">${name}</div>
+      </div>`;
+    }).join('');
+
+    let phasesHtml = '';
+    for (const [phName, {color, items}] of Object.entries(phData)) {
+      const col = COLORS[color]||COLORS.gray;
+      phasesHtml += `<div style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:6px;padding:5px 10px;background:${col.pill};border-radius:6px;margin-bottom:3px">
+          <div style="width:8px;height:8px;background:${col.pillText};border-radius:2px;flex-shrink:0"></div>
+          <span style="font-size:.72rem;font-weight:700;color:${col.pillText};text-transform:uppercase;letter-spacing:.05em">${phName}</span>
+        </div>
+        ${items.map(ms => {
+          const cls = dateCls(ms.date, ms.critical);
+          const dateStr = ms.type==='range'&&ms.endDate ? ms.date.slice(5)+'~'+ms.endDate.slice(5) : ms.date.slice(5);
+          return `<div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 10px;border-bottom:0.5px solid var(--border);font-size:.75rem">
+            <span style="color:var(--text-2);flex:1;padding-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ms.event}</span>
+            <span style="font-family:var(--mono);font-size:.68rem;font-weight:600;white-space:nowrap;color:${cls==='past'?'var(--text-3)':cls==='critical'?'var(--red)':cls==='soon'?'var(--amber)':'var(--text-1)'};${cls==='past'?'text-decoration:line-through':''}">${dateStr}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    return `<div style="flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="font-weight:700;font-size:.9rem;color:${accentColor}">${srcName}</span>
+        <span style="font-size:.72rem;color:var(--text-3)">FCS: ${pData.fcs||'TBD'}</span>
+      </div>
+      <div style="display:flex;overflow:hidden;border-bottom:1px solid var(--border)">${phaseFlowHtml}</div>
+      <div style="padding:10px 0;max-height:65vh;overflow-y:auto">${phasesHtml||'<div style="padding:20px;color:var(--text-3);text-align:center">No milestones for this platform</div>'}</div>
+    </div>`;
+  }
+
+  // Platform chips
+  const platChipsHtml = platforms.map((pl,i) =>
+    `<button class="plat-chip${pl.key===currentPlatKey?' active':''}" onclick="selectPlatform('${pl.key}')"
+      style="padding:5px 16px;border-radius:20px;font-size:.78rem;font-weight:600;
+      border:1.5px solid ${pl.key===currentPlatKey?'var(--accent)':'var(--border2)'};
+      background:${pl.key===currentPlatKey?'var(--accent)':'white'};
+      color:${pl.key===currentPlatKey?'white':'var(--text-2)'};
+      cursor:pointer;font-family:var(--sans);transition:all .15s">${pl.label}</button>`
+  ).join('');
+
+  const colsHtml = `<div style="display:grid;grid-template-columns:${hasB?'1fr 1fr':'1fr'};gap:16px">
+    ${buildSummaryCol(pA, nameA2, 'var(--accent)')}
+    ${hasB ? buildSummaryCol(pB, nameB2, 'var(--green)') : ''}
+  </div>`;
+
+  document.getElementById('output').innerHTML = `
+    <div class="gantt-panel" style="padding:0;margin-bottom:20px">
+      <div class="gantt-toolbar">
+        <div>
+          <div class="gantt-project">${nameA2}${hasB?' vs '+nameB2:''}</div>
+          <div class="gantt-meta">FCS: ${pA.fcs||'TBD'}${hasB&&pB?.fcs?' / '+pB.fcs:''}</div>
+        </div>
+        <div class="toolbar-right">
+          <button class="tab-btn active" onclick="switchView('summary')">📋 Summary</button>
+          <button class="tab-btn" onclick="switchView('gantt')">📊 Gantt Chart</button>
+          ${hasB?`<button class="tab-btn" onclick="switchView('compare')">🔄 Compare</button>`:''}
+          <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+      <div style="padding:12px 20px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3)">Platform</span>
+        ${platChipsHtml}
+      </div>
+    </div>
+    ${colsHtml}`;
+}
+
+window.selectPlatform = function(platKey) {
+  currentPlatKey = platKey;
+  const nA = document.getElementById('nameA')?.value?.trim()||'File A';
+  const nB = document.getElementById('nameB')?.value?.trim()||'File B';
+  renderSummary(nA, nB);
+};
+
+// ── Compare View ──────────────────────────────────────────────
+function renderCompareView(nameA, nameB) {
+  const pA = S.parsed[1], pB = S.parsed[2];
+  if (!pA||!pB) return;
+  const nameA2=nameA||'File A', nameB2=nameB||'File B';
+  const phaseNames = [...new Set([...pA.phases.map(p=>p.name),...pB.phases.map(p=>p.name)])];
+  let rows = '';
+  for (const phName of phaseNames) {
+    const phA = pA.phases.find(p=>p.name===phName);
+    const phB = pB.phases.find(p=>p.name===phName);
+    const col = COLORS[(phA||phB).color]||COLORS.gray;
+    const allEvts = new Map();
+    for (const ms of (phA?.milestones||[])) allEvts.set(ms.event,{a:ms,b:null});
+    for (const ms of (phB?.milestones||[])) {
+      if (allEvts.has(ms.event)) allEvts.get(ms.event).b=ms;
+      else allEvts.set(ms.event,{a:null,b:ms});
+    }
+    rows += `<div class="phase-section">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <span class="phase-arrow open">▶</span>
+        <span class="phase-name" style="color:${col.pillText}">${phName}</span>
+        <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${allEvts.size} items</span>
+      </div>
+      <div class="phase-body">
+        <div class="compare-row" style="background:#fafbfc;min-height:26px">
+          <div class="compare-label" style="color:var(--text-3);font-size:.7rem;font-weight:700">Milestone</div>
+          <div class="compare-dates">
+            <span style="color:var(--accent);min-width:80px;font-size:.72rem;font-weight:700">${nameA2}</span>
+            <span style="color:var(--green);min-width:80px;font-size:.72rem;font-weight:700">${nameB2}</span>
+            <span style="color:var(--amber);font-size:.72rem;font-weight:700">Diff</span>
+          </div>
+        </div>`;
+    for (const [evt,{a,b}] of allEvts) {
+      const dA=a?.date||null, dB=b?.date||null;
+      let diffHtml='<span class="diff-badge diff-same">—</span>';
+      if (dA&&dB) {
+        const diff=Math.round((new Date(dB)-new Date(dA))/86400000);
+        diffHtml=diff===0?`<span class="diff-badge diff-same">same</span>`:diff>0?`<span class="diff-badge diff-late">+${diff}d</span>`:`<span class="diff-badge diff-early">${diff}d</span>`;
+      } else if (!dA) diffHtml=`<span class="diff-badge diff-late">${nameB2} only</span>`;
+      else diffHtml=`<span class="diff-badge diff-early">${nameA2} only</span>`;
+      rows+=`<div class="compare-row">
+        <div class="compare-label" title="${evt}">${evt}</div>
+        <div class="compare-dates">
+          <span class="date-a" style="min-width:80px">${dA?dA.slice(5):'—'}</span>
+          <span class="date-b" style="min-width:80px">${dB?dB.slice(5):'—'}</span>
+          ${diffHtml}
+        </div>
+      </div>`;
+    }
+    rows+='</div></div>';
+  }
+
+  document.getElementById('output').innerHTML=`
+    <div class="gantt-panel" style="padding:0;margin-bottom:20px">
+      <div class="gantt-toolbar">
+        <div><div class="gantt-project">Compare: ${nameA2} vs ${nameB2}</div></div>
+        <div class="toolbar-right">
+          <button class="tab-btn" onclick="switchView('summary')">📋 Summary</button>
+          <button class="tab-btn" onclick="switchView('gantt')">📊 Gantt Chart</button>
+          <button class="tab-btn active" onclick="switchView('compare')">🔄 Compare</button>
+          <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+    </div>
+    <div class="gantt-panel">${rows}</div>`;
 }
 
 window.scrollToPhase = function(sectionId) {
@@ -806,8 +885,8 @@ window.filterPlatform = function(btn, srcName, platKey) {
 
 function switchView(v){
   S.view=v;
-  const nA=document.getElementById('nameA').value.trim()||'File A';
-  const nB=document.getElementById('nameB').value.trim()||'File B';
+  const nA=document.getElementById('nameA')?.value?.trim()||'File A';
+  const nB=document.getElementById('nameB')?.value?.trim()||'File B';
   renderGantt(nA,nB);
 }
 
