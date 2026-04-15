@@ -517,10 +517,13 @@ function renderGantt(nameA, nameB) {
     let phasesHtml = '';
     for (const ph of pData.phases) {
       const col = COLORS[ph.color] || COLORS.gray;
-      phasesHtml += `<div class="phase-section">
+      const sectionId = `phase-${srcName.replace(/\s+/g,'-')}-${ph.name.replace(/\s+/g,'-')}`;
+      phasesHtml += `<div class="phase-section" id="${sectionId}">
         <div class="phase-header" onclick="togglePhase(this)">
           <span class="phase-arrow open">▶</span>
-          <span class="phase-name" style="color:${col.pillText}">${ph.name}</span>
+          <span class="phase-name" style="color:${col.pillText};cursor:pointer"
+            onclick="event.stopPropagation();scrollToPhase('${sectionId}')"
+            title="Click to focus this phase">${ph.name}</span>
           <span class="phase-pill" style="background:${col.pill};color:${col.pillText}">${ph.milestones.length} items</span>
         </div>
         <div class="phase-body">`;
@@ -559,11 +562,16 @@ function renderGantt(nameA, nameB) {
     const phaseFlowHtml = phaseNames.map((name, i) => {
       const pc = PHASE_COLORS_MAP[name] || {bg:'#888',text:'white'};
       const isLast = i === phaseNames.length - 1;
+      const sectionId = `phase-${srcName.replace(/\s+/g,'-')}-${name.replace(/\s+/g,'-')}`;
       return `<div style="display:flex;align-items:stretch;flex:1;min-width:80px;position:relative">
-        <div style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.82rem;
+        <div onclick="scrollToPhase('${sectionId}')"
+          style="background:${pc.bg};color:${pc.text};font-weight:700;font-size:.82rem;
           padding:8px 12px 8px ${i===0?'12px':'20px'};display:flex;align-items:center;
-          justify-content:center;flex:1;clip-path:${isLast?'none':`polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, ${i===0?'0':'12px'} 50%)`};
-          z-index:${10-i}">${name}</div>
+          justify-content:center;flex:1;cursor:pointer;transition:filter .15s;
+          clip-path:${isLast?'none':`polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, ${i===0?'0':'12px'} 50%)`};
+          z-index:${10-i}"
+          onmouseover="this.style.filter='brightness(1.15)'"
+          onmouseout="this.style.filter=''">${name}</div>
       </div>`;
     }).join('');
 
@@ -729,35 +737,70 @@ function renderGantt(nameA, nameB) {
   document.getElementById('output').innerHTML = toolbar + content;
 }
 
+window.scrollToPhase = function(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (!el) return;
+  // Expand if collapsed
+  const body = el.querySelector('.phase-body');
+  const arrow = el.querySelector('.phase-arrow');
+  if (body && body.style.display === 'none') {
+    body.style.display = '';
+    if (arrow) arrow.classList.add('open');
+  }
+  // Scroll into view
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Flash highlight
+  const header = el.querySelector('.phase-header');
+  if (header) {
+    header.style.transition = 'background .2s';
+    header.style.background = '#e8effe';
+    setTimeout(() => { header.style.background = ''; }, 1200);
+  }
+};
+
 window.filterPlatform = function(btn, srcName, platKey) {
-  // Update chip styles
   const panel = btn.closest('[data-src]');
   if (!panel) return;
+
+  // Update chip styles
+  const accentColor = panel.querySelector('.gantt-project')?.style.color || 'var(--accent)';
   panel.querySelectorAll('.plat-chip').forEach(b => {
     b.style.background = 'white';
     b.style.color = 'var(--text-2)';
     b.style.borderColor = 'var(--border2)';
   });
-  const accentColor = panel.querySelector('.gantt-project')?.style.color || 'var(--accent)';
   btn.style.background = accentColor;
   btn.style.color = 'white';
   btn.style.borderColor = accentColor;
 
-  // Filter rows
-  const rows = panel.querySelectorAll('.milestone-row');
-  rows.forEach(row => {
+  const platMap = {
+    intel_wcl: /wcl/i, intel_ptl: /ptl/i, intel_nvl: /nvl/i,
+    intel_nextgen: /next.?gen|mainstream/i,
+    qcom_main: /purwa|mahua|kalambo/i, qcom_refresh: /refresh/i,
+  };
+
+  // Filter rows - show/hide entire rows cleanly
+  panel.querySelectorAll('.milestone-row').forEach(row => {
     if (platKey === 'all') {
       row.style.display = '';
     } else {
-      const label = row.querySelector('.ms-label')?.title?.toLowerCase() || '';
-      const platMap = {
-        intel_wcl: /wcl/i, intel_ptl: /ptl/i, intel_nvl: /nvl/i,
-        intel_nextgen: /next.?gen|mainstream/i,
-        qcom_main: /purwa|mahua|kalambo/i, qcom_refresh: /refresh/i,
-      };
+      const label = (row.querySelector('.ms-label')?.title || row.querySelector('.ms-label')?.textContent || '').toLowerCase();
       const re = platMap[platKey];
-      row.style.display = re && re.test(label) ? '' : 'none';
+      // Show row if event label matches platform OR if no platform keywords at all (generic items)
+      const hasAnyPlatKey = Object.values(platMap).some(r => r.test(label));
+      const matches = re && re.test(label);
+      row.style.display = (matches || !hasAnyPlatKey) ? '' : 'none';
     }
+  });
+
+  // Update item counts on phase headers
+  panel.querySelectorAll('.phase-section').forEach(section => {
+    const body = section.querySelector('.phase-body');
+    const pill = section.querySelector('.phase-pill');
+    if (!body || !pill) return;
+    const visible = body.querySelectorAll('.milestone-row:not([style*="display: none"]):not([style*="display:none"])').length;
+    const total = body.querySelectorAll('.milestone-row').length;
+    pill.textContent = platKey === 'all' ? `${total} items` : `${visible} / ${total}`;
   });
 };
 
