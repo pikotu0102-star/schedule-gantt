@@ -237,10 +237,10 @@ async function extractPptx(file){
             // Detect scenario suffix
             const scenMatch = full.match(/w[\/\s]*o?\s*me|scenario\s*\d+/i);
             const scen = scenMatch ? ' ' + scenMatch[0].replace(/\s+/g,' ').trim() : '';
-            if(/intel.*wcl|wcl.*intel/i.test(raw)) slidePlat = '[Intel WCL'+scen+']';
-            else if(/intel.*ptl|ptl.*intel/i.test(raw)) slidePlat = '[Intel PTL'+scen+']';
-            else if(/intel.*nvl|nvl.*intel/i.test(raw)) slidePlat = '[Intel NVL'+scen+']';
-            else if(/qc|qualcomm/i.test(raw)) slidePlat = '[Qualcomm'+scen+']';
+            if(/intel.*wcl|wcl.*intel/i.test(raw)) slidePlat = '[Intel WCL]';
+            else if(/intel.*ptl|ptl.*intel/i.test(raw)) slidePlat = '[Intel PTL]';
+            else if(/intel.*nvl|nvl.*intel/i.test(raw)) slidePlat = '[Intel NVL]';
+            else if(/qc|qualcomm/i.test(raw)) slidePlat = '[Qualcomm]';
           }
 
           // Split on paragraph tags to preserve line structure
