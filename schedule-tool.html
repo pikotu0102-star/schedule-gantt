@@ -791,8 +791,14 @@ function renderSummary(nameA, nameB) {
             const dateColor = cls==='past'?'var(--text-3)':cls==='critical'?'var(--red)':cls==='soon'?'var(--amber)':'var(--text-1)';
             return `<tr style="background:${i%2===0?'var(--surface)':'var(--surface2)'};border-bottom:0.5px solid var(--border)">
               <td style="padding:7px 20px;font-size:.8rem;color:var(--text-2)">
-                ${ms.event}
-                ${ms.critical?'<span style="margin-left:6px;font-size:.62rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>':''}
+                ${(() => {
+                  const platMatch = ms.event.match(/\s*(\[Intel\s+[^\]]+\]|\[Qualcomm[^\]]+\])/);
+                  const platTag = platMatch ? platMatch[1] : '';
+                  const cleanEvt = ms.event.replace(/\s*\[[^\]]+\]/g,'').trim();
+                  return cleanEvt +
+                    (platTag ? `<span style="margin-left:5px;font-size:.6rem;background:#e8effe;color:#185FA5;padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">${platTag.slice(1,-1)}</span>` : '') +
+                    (ms.critical ? '<span style="margin-left:5px;font-size:.62rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>' : '');
+                })()}
               </td>
               <td style="padding:7px 20px;font-family:var(--mono);font-size:.75rem;font-weight:600;text-align:right;color:${dateColor};${cls==='past'?'text-decoration:line-through':''};white-space:nowrap">${dateStr}</td>
             </tr>`;
@@ -868,15 +874,27 @@ function renderSummary(nameA, nameB) {
               border-bottom:1px solid var(--border);background:${col.pill};margin-top:4px">
               CPU Supply
             </div>
-            ${cpuPhase.milestones.map(ms => {
-              const dateStr = ms.type==='range'&&ms.endDate
-                ? ms.date.slice(5)+'→'+ms.endDate.slice(5)
-                : ms.date.slice(5);
-              return `<div style="padding:6px 20px;border-bottom:0.5px solid var(--border);font-size:.72rem">
-                <div style="color:var(--text-2);margin-bottom:1px;line-height:1.3">${ms.event}</div>
-                <div style="font-family:var(--mono);font-size:.68rem;font-weight:600;color:${col.pillText}">${dateStr}</div>
-              </div>`;
-            }).join('')}
+            ${(() => {
+              const seen = new Set();
+              return cpuPhase.milestones
+                .filter(ms => {
+                  const baseEvent = ms.event.replace(/\s*\[Intel\s+[^\]]*\]/g,'').replace(/\s*\[Qualcomm[^\]]*\]/g,'').trim();
+                  const key = baseEvent + '|' + ms.date;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                })
+                .map(ms => {
+                  const dateStr = ms.type==='range'&&ms.endDate
+                    ? ms.date.slice(5)+'→'+ms.endDate.slice(5)
+                    : ms.date.slice(5);
+                  const cleanEvt = ms.event.replace(/\s*\[[^\]]+\]/g,'').trim();
+                  return `<div style="padding:6px 20px;border-bottom:0.5px solid var(--border);font-size:.72rem">
+                    <div style="color:var(--text-2);margin-bottom:1px;line-height:1.3">${cleanEvt}</div>
+                    <div style="font-family:var(--mono);font-size:.68rem;font-weight:600;color:${col.pillText}">${dateStr}</div>
+                  </div>`;
+                }).join('');
+            })()}
           </div>`;
         })()}
       </div>` : ''}
