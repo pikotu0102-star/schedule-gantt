@@ -228,6 +228,11 @@ async function extractPptx(file){
         for(const k of keys){
           const xml=await decompress(files[k]);
 
+          // Skip non-milestone slides: Backup dividers, Dashboard summaries, Thank You, etc.
+          // These are support slides that would create duplicate milestones
+          const isSupportSlide = />\s*(Backup|Thank\s+You[!]?|[\w\s]+-W\d+\s+Dashboard)\s*</i.test(xml);
+          if (isSupportSlide) continue;
+
           // Detect platform + scenario for this slide from its title shape
           let slidePlat = '';
           // HQ style: all platforms in one slide — no per-slide platform tag
