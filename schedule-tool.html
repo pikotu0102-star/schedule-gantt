@@ -414,6 +414,11 @@ function cleanEvent(line) {
     // Remove separators
     .replace(/^[=\-~\s>:()+]+|[=\-~\s>:()+]+$/g, '')
     .replace(/\s+/g, ' ').trim();
+  // Remove trailing ~/number, ~(Wx to Wx), =(Wx...) artifacts
+  s = s.replace(/\s*~\s*\/\d+\s*$/g, '');
+  s = s.replace(/\s*~\s*\(W\d+[^)]*\)\s*$/gi, '');
+  s = s.replace(/\s*=\s*\(W\d+[^)]*\)\s*$/gi, '');
+  s = s.trim();
   if (s.length > 55) s = s.slice(0, 52) + '...';
   return (s || line.slice(0, 40).trim()) + platTag;}
 
