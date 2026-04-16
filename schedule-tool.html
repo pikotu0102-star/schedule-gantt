@@ -230,7 +230,9 @@ async function extractPptx(file){
 
           // Detect platform + scenario for this slide from its title shape
           let slidePlat = '';
-          const titleMatch = xml.match(/milestone[\s\S]{0,50}?\(([^)]+)\)/i);
+          // HQ style: all platforms in one slide — no per-slide platform tag
+          const isHQStyle = /asia.bay|wave.\d+.dev.schedule|dev.schedule.*award/i.test(xml);
+          const titleMatch = isHQStyle ? null : xml.match(/milestone[\s\S]{0,50}?\(([^)]+)\)/i);
           if(titleMatch){
             const raw = titleMatch[1].toLowerCase();
             const full = titleMatch[0];
