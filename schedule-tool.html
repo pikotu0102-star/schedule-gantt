@@ -399,28 +399,53 @@ function cleanEvent(line) {
   const platTag = platMatch ? ' ' + platMatch[1] : '';
   line = line.replace(/__PLAT__\[[^\]]+\]/g, '');
 
+  // Pre-process: expand "WCQ: (PV SVTP)" → "PV SVTP (WCQ)" BEFORE parens are stripped
+  line = line.replace(/^(WCQ|WHQ)\s*:\s*\(([^)]+)\)\s*/i, '$2 ($1) ');
+
   let s = line
-    // Remove YY'M/D dates
+    // Remove YY'M/D dates (e.g. 26'4/24)
     .replace(/\d{2}['\u2019\u2018]\d{1,2}\/\d{1,2}/g, '')
-    // Remove YYYY/M/D dates
+    // Remove YYYY/M/D dates (e.g. 2026/4/24)
     .replace(/202[67]\/\d{1,2}\/\d{1,2}/g, '')
-    // Remove standalone M/D ranges like "6/15~7/28" or "6/15-7/28"
+    // Remove M/D~M/D and M/D-M/D ranges
     .replace(/\d{1,2}\/\d{1,2}[~\-]\d{1,2}\/\d{1,2}/g, '')
     // Remove remaining M/D tokens
-    .replace(/\b\d{1,2}\/\d{1,2}\b/g, '')
-    // Remove duration tokens
-    .replace(/\(\d+\.?\d*\s*(?:wks?|days?|weeks?)\)/gi, '')
-    .replace(/\d+\.?\d*\s*w(?:ks?)?\b/gi, '')
-    // Remove separators
+    .replace(/\b\d{1,2}\/\d{1,2}\b/g, '');
+
+  // Strip everything from = or ~ onward when followed by duration/condition notes
+  // Handles: "SI SVTP test = ~ (28D+10D)", "MV build = (W5)", "Tooling Start = ~ (32D+3D)"
+  // "DB layout = ~ (24D+5)CN Labor Day"
+  s = s
+    .replace(/\s*=\s*~.*$/, '')           // strip "= ~..." to end
+    .replace(/\s*~\s*=.*$/, '')           // strip "~ =..." to end
+    .replace(/\s*[=~]+\s*\(.*$/, '')     // strip "= (" or "~ (" to end
+    .replace(/\s*=\s*$/, '');             // strip trailing bare "="
+
+  // Remove duration tokens in parens: (4wks), (28D+10D), (7D), (3.5 weeks), (4Wks+3D), (24D+5)
+  s = s
+    .replace(/\([^)]*\d+[^)]*(?:wks?|days?|weeks?|[Dd])[^)]*\)/gi, '')
+    .replace(/\([^)]*(?:wks?|days?|weeks?)[^)]*\)/gi, '')
+    .replace(/\d+\.?\d*\s*w(?:ks?)?\b/gi, '');
+
+  s = s
     .replace(/^[=\-~\s>:()+]+|[=\-~\s>:()+]+$/g, '')
     .replace(/\s+/g, ' ').trim();
-  // Remove trailing ~/number, ~(Wx to Wx), =(Wx...) artifacts
-  s = s.replace(/\s*~\s*\/\d+\s*$/g, '');
-  s = s.replace(/\s*~\s*\(W\d+[^)]*\)\s*$/gi, '');
-  s = s.replace(/\s*=\s*\(W\d+[^)]*\)\s*$/gi, '');
-  s = s.trim();
+
+  // Final cleanup of leftover artifacts
+  s = s
+    .replace(/\s*~\s*\/\d+\s*$/g, '')
+    .replace(/\s*~\s*\([^)]*\)\s*$/gi, '')
+    .replace(/\s*=\s*\([^)]*\)\s*$/gi, '')
+    .replace(/\s*[=~]\s*$/, '').trim();
+
+  // Clean bare "WCQ: " or "WHQ: " prefix (keep as short label)
+  s = s.replace(/^(WCQ|WHQ)\s*:\s*/i, '$1 ').trim();
+  // Remove orphaned opening parens at end: "SI SMT (Prod" → "SI SMT"
+  s = s.replace(/\s*\([^)]*$/, '').trim();
+
   if (s.length > 55) s = s.slice(0, 52) + '...';
-  return (s || line.slice(0, 40).trim()) + platTag;}
+  return (s || line.slice(0, 40).trim()) + platTag;
+}
 
 function isCritical(line) {
   return /\bFCS\b|\bRTM\b|\bRTP\b|\/RTP|Phase Exit|\bPLD\b|\bCFZ\b/i.test(line);
@@ -438,6 +463,10 @@ function joinFragments(lines) {
     const nextHasDates = extractDates(next).length > 0;
     // If current has date and next is label-only (short, no date), merge
     if (hasDates && next && !nextHasDates && next.length < 20 && !isNoiseLine(next)) {
+      result.push(line + ' ' + next);
+      i += 2;
+    // If current has NO date but is short label, and next has date — merge (e.g. "WCQ: (PV SVTP)" + "10/27-11/25")
+    } else if (!hasDates && nextHasDates && line.length < 30 && !isNoiseLine(line) && !/^\d{4}/.test(line)) {
       result.push(line + ' ' + next);
       i += 2;
     } else {
@@ -460,6 +489,7 @@ function parseScheduleText(txt, srcName) {
   for (const ph of PHASE_DEF) phaseMap.set(ph.name, { ...ph, milestones: [] });
 
   let projectName = '', fcsDate = null;
+  let lastPhase = null;  // stateful tracker for WCQ/WHQ SVTP lines
 
   for (const line of lines) {
     // Project name
@@ -482,22 +512,34 @@ function parseScheduleText(txt, srcName) {
     if (!dates.length) continue;
 
     const ph = getPhase(line2);
-    if (!ph) continue;
+    if (ph) lastPhase = ph;
+
+    // WCQ/WHQ SVTP: Wistron uses "WCQ: date-range (Nwks)" after build items
+    // Assign to last active phase (SI/PV/MV) since it IS that phase's SVTP
+    let effectivePh = ph;
+    if (!ph && /^(WCQ|WHQ)\s*:/i.test(line2) && dates.length > 0 && lastPhase) {
+      effectivePh = lastPhase;
+    }
+    if (!effectivePh) continue;
 
     const eventName = cleanEvent(line2);
     if (!eventName || eventName.length < 2) continue;
     if (/^conditions?$/i.test(eventName)) continue;
 
     const type = dates.length >= 2 ? 'range' : 'point';
+    // Extract lead time from parens: (4 weeks), (3wks), (7D), (28D+10D), (4Wks+3D)
+    const ltMatch = line2.match(/\(([^)]*\d+[^)]*(?:wks?|days?|weeks?|[Dd])[^)]*|[^)]*(?:wks?|days?|weeks?)[^)]*)\)/i);
+    const leadTime = ltMatch ? ltMatch[1].trim() : null;
     const entry = {
       event: eventName,
       date: dates[0],
       endDate: dates.length >= 2 ? dates[1] : null,
       type,
       critical: isCritical(line2),
+      leadTime,
     };
 
-    const bucket = phaseMap.get(ph.name);
+    const bucket = phaseMap.get(effectivePh.name);
     if (!bucket.milestones.find(m => m.event === entry.event && m.date === entry.date)) {
       bucket.milestones.push(entry);
     }
@@ -819,6 +861,7 @@ function renderSummary(nameA, nameB) {
                   const cleanEvt = ms.event.replace(/\s*\[[^\]]+\]/g,'').trim();
                   return cleanEvt +
                     (platTag ? `<span style="margin-left:5px;font-size:.6rem;background:#e8effe;color:#185FA5;padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">${platTag.slice(1,-1)}</span>` : '') +
+                    (ms.leadTime ? `<span style="margin-left:5px;font-size:.6rem;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #bbf7d0">⏱ ${ms.leadTime}</span>` : '') +
                     (ms.critical ? '<span style="margin-left:5px;font-size:.62rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>' : '');
                 })()}
               </td>
