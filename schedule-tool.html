@@ -331,6 +331,8 @@ function isNoiseLine(line) {
          /resin.*paint/i.test(line) ||
          /npi pm:/i.test(line) ||
          /^vv$/i.test(line) ||
+         /dev\s*schedule.*award|award.*dev\s*schedule/i.test(line) ||
+         /\bfcs\s+fcs\b/i.test(line) ||
          line.length > 100;
 }
 
@@ -735,8 +737,10 @@ function renderSummary(nameA, nameB) {
             if (hasPlatTag && !re.test(ms.event)) return false;
           }
         }
-        // Deduplicate: same event + same date = skip
-        const key = ms.event.trim().toLowerCase() + '|' + ms.date;
+        // Deduplicate: for tagged items use event+date; for untagged (HQ) dedup by event name only
+        const baseEvt = ms.event.replace(/\s*\[[^\]]+\]/g,'').trim().toLowerCase();
+        const hasPlatTag = ms.event.includes('[');
+        const key = hasPlatTag ? (ms.event.trim().toLowerCase() + '|' + ms.date) : baseEvt;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
