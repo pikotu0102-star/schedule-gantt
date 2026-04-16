@@ -224,14 +224,25 @@ async function extractPptx(file){
           }else i++;
         }
         let txt='';
-        const keys=Object.keys(files).sort();
+        // Sort slides NUMERICALLY (not alphabetically) so slide2 < slide13
+        const keys=Object.keys(files).sort((a,b)=>{
+          const na=parseInt(a.match(/\d+/)?.[0]||0);
+          const nb=parseInt(b.match(/\d+/)?.[0]||0);
+          return na-nb;
+        });
+        let passedBackup = false;
         for(const k of keys){
           const xml=await decompress(files[k]);
 
-          // Skip non-milestone slides: Backup dividers, Dashboard summaries, Thank You, etc.
-          // These are support slides that would create duplicate milestones
-          const isSupportSlide = />\s*(Backup|Thank\s+You[!]?|[\w\s]+-W\d+\s+Dashboard)\s*</i.test(xml);
-          if (isSupportSlide) continue;
+          // Skip "Thank You" slides always
+          if (/>\s*Thank\s*You[!]?\s*</i.test(xml)) continue;
+
+          // Detect Backup divider slide — mark flag and skip the divider itself
+          if (/>\s*Backup\s*</i.test(xml)) { passedBackup = true; continue; }
+
+          // After Backup: allow Dashboard slides (they have unique phase data e.g. DB SVTP),
+          // but skip all other slides (they are duplicate copies of pre-Backup milestone slides)
+          if (passedBackup && !/\bDashboard\b/i.test(xml)) continue;
 
           // Detect platform + scenario for this slide from its title shape
           let slidePlat = '';
@@ -488,6 +499,16 @@ function parseScheduleText(txt, srcName) {
            .replace(/\r/g, '');
 
   let lines = txt.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+
+  // Pre-split: handle lines where multiple milestones are concatenated
+  // e.g. "BBU=26'6/6~26'6/12 (7D)DB SVTP = 26'6/15~26'7/15 (4Wks+3D)"
+  // Split after any closing-paren when an uppercase milestone keyword follows
+  lines = lines.flatMap(l => {
+    const normalized = l.replace(/(\([^)]+\))\s*(?=[A-Z]{2}[A-Z\s])/g, '$1\n');
+    if (!normalized.includes('\n')) return [l];
+    return normalized.split('\n').map(p => p.trim()).filter(p => p.length > 2);
+  });
+
   lines = joinFragments(lines);
 
   const phaseMap = new Map();
