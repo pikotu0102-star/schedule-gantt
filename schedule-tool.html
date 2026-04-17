@@ -977,9 +977,10 @@ function renderSummary(nameA, nameB) {
                   let ltBadge = '';
                   if (ms.leadTime) {
                     ltBadge = `<span style="margin-left:5px;font-size:.6rem;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #bbf7d0">⏱ ${ms.leadTime}</span>`;
-                  } else if (ms.endDate) {
-                    const calDays = Math.round((new Date(ms.endDate) - new Date(ms.date)) / 86400000) + 1;
-                    const wkDays = countWorkingDays(ms.date, ms.endDate);
+                  } else {
+                    const endD = ms.endDate || ms.date;
+                    const calDays = Math.round((new Date(endD) - new Date(ms.date)) / 86400000) + 1;
+                    const wkDays = countWorkingDays(ms.date, endD);
                     ltBadge = `<span title="${calDays} calendar days / ${wkDays} working days" style="margin-left:5px;font-size:.6rem;background:#f8faff;color:#3b5bdb;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #c5d0fb">⏱ ${calDays}CD / ${wkDays}WD</span>`;
                   }
                   return cleanEvt +
