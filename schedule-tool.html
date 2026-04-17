@@ -681,6 +681,7 @@ function parseScheduleText(txt, srcName) {
 function generate(){
   const nameA=document.getElementById('nameA').value.trim()||'File A';
   const nameB=document.getElementById('nameB').value.trim()||'File B';
+  S.nameA = nameA; S.nameB = nameB;  // persist names so re-renders don't lose them
   try{
     S.parsed[1]=parseScheduleText(S.texts[1],nameA);
     S.parsed[2]=S.texts[2]?parseScheduleText(S.texts[2],nameB):null;
@@ -729,6 +730,8 @@ const ALL_PLATFORMS = [
 let currentPlatKey = 'all';
 
 function renderGantt(nameA, nameB) {
+  nameA = nameA || S.nameA || 'File A';
+  nameB = nameB || S.nameB || 'File B';
   const pA = S.parsed[1], pB = S.parsed[2];
   if (!pA) return;
   if (S.view === 'summary') { renderSummary(nameA, nameB); return; }
@@ -1111,16 +1114,12 @@ function renderSummary(nameA, nameB) {
 window.selectPlatform = function(platKey) {
   currentPlatKey = platKey;
   if (!currentPlatKey) currentPlatKey = null;
-  const nA = document.getElementById('nameA')?.value?.trim()||'File A';
-  const nB = document.getElementById('nameB')?.value?.trim()||'File B';
-  renderSummary(nA, nB);
+  renderGantt();
 };
 
 window.selectCompany = function(name) {
   S.currentCompany = name;
-  const nA = document.getElementById('nameA')?.value?.trim()||'File A';
-  const nB = document.getElementById('nameB')?.value?.trim()||'File B';
-  renderSummary(nA, nB);
+  renderGantt();
 };
 
 // ── Compare View ──────────────────────────────────────────────
@@ -1259,9 +1258,7 @@ window.filterPlatform = function(btn, srcName, platKey) {
 
 function switchView(v){
   S.view=v;
-  const nA=document.getElementById('nameA')?.value?.trim()||'File A';
-  const nB=document.getElementById('nameB')?.value?.trim()||'File B';
-  renderGantt(nA,nB);
+  renderGantt();
 }
 
 function togglePhase(hdr){
