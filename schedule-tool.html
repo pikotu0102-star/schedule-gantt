@@ -973,9 +973,18 @@ function renderSummary(nameA, nameB) {
                   const platMatch = ms.event.match(/\s*(\[Intel\s+[^\]]+\]|\[Qualcomm[^\]]+\])/);
                   const platTag = platMatch ? platMatch[1] : '';
                   const cleanEvt = ms.event.replace(/\s*\[[^\]]+\]/g,'').trim();
+                  // Auto-compute duration for range items that don't have explicit leadTime
+                  let ltBadge = '';
+                  if (ms.leadTime) {
+                    ltBadge = `<span style="margin-left:5px;font-size:.6rem;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #bbf7d0">⏱ ${ms.leadTime}</span>`;
+                  } else if (ms.endDate) {
+                    const calDays = Math.round((new Date(ms.endDate) - new Date(ms.date)) / 86400000) + 1;
+                    const wkDays = countWorkingDays(ms.date, ms.endDate);
+                    ltBadge = `<span title="${calDays} calendar days / ${wkDays} working days" style="margin-left:5px;font-size:.6rem;background:#f8faff;color:#3b5bdb;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #c5d0fb">⏱ ${calDays}CD / ${wkDays}WD</span>`;
+                  }
                   return cleanEvt +
                     (platTag ? `<span style="margin-left:5px;font-size:.6rem;background:#e8effe;color:#185FA5;padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">${platTag.slice(1,-1)}</span>` : '') +
-                    (ms.leadTime ? `<span style="margin-left:5px;font-size:.6rem;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:3px;font-weight:600;vertical-align:middle;border:1px solid #bbf7d0">⏱ ${ms.leadTime}</span>` : '') +
+                    ltBadge +
                     (ms.critical ? '<span style="margin-left:5px;font-size:.62rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>' : '');
                 })()}
               </td>
