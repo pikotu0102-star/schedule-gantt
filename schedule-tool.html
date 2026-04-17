@@ -139,7 +139,7 @@ input[type="file"]{display:none}
 </div>
 <script>
 // ── State ──────────────────────────────────────────────────────
-const S = { texts:{1:'',2:''}, parsed:{1:null,2:null}, view:'gantt' };
+const S = { texts:{1:'',2:''}, parsed:{1:null,2:null}, view:'gantt', wdTemplate:'off' };
 
 // ── File loading ───────────────────────────────────────────────
 function ev(e){e.preventDefault()}
@@ -298,6 +298,63 @@ function getDow(dateStr) {
   const d = new Date(dateStr);
   return isNaN(d) ? '' : DOW[d.getDay()];
 }
+
+// ── Working-day helpers ────────────────────────────────────────
+// Count Mon–Fri days from refDate up to and including targetDate (day 1 = refDate itself)
+function countWorkingDays(refDate, targetDate) {
+  const start = new Date(refDate), end = new Date(targetDate);
+  if (end < start) return null;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+// ISO calendar week number
+function getISOWeek(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const w1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7);
+}
+// Return the badge HTML for a given milestone date, template, and reference date
+function getWdBadge(dateStr, refDate, template) {
+  if (!template || template === 'off' || !dateStr) return '';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr);
+  const style = (bg, fg) =>
+    `style="margin-left:6px;font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:3px;` +
+    `background:${bg};color:${fg};vertical-align:middle;display:inline-block;font-family:var(--mono)"`;
+
+  if (template === 'wday' && refDate) {
+    const n = countWorkingDays(refDate, dateStr);
+    if (n === null) return '';
+    return `<span ${style('#f0f9ff','#0369a1')}>W${n}</span>`;
+  }
+  if (template === 'cday' && refDate) {
+    const diff = Math.round((target - new Date(refDate)) / 86400000) + 1;
+    if (diff < 1) return '';
+    return `<span ${style('#faf5ff','#7e22ce')}>D${diff}</span>`;
+  }
+  if (template === 'ww') {
+    const ww = getISOWeek(dateStr);
+    return `<span ${style('#fffbeb','#92400e')}>WW${ww}</span>`;
+  }
+  if (template === 'dtt') {
+    const diff = Math.round((target - today) / 86400000);
+    if (diff === 0) return `<span ${style('#fef9c3','#854d0e')}>Today</span>`;
+    const label = diff > 0 ? `+${diff}d` : `${diff}d`;
+    const bg = diff < 0 ? '#fef2f2' : diff < 14 ? '#fff7ed' : '#f0fdf4';
+    const fg = diff < 0 ? '#991b1b' : diff < 14 ? '#92400e' : '#166534';
+    return `<span ${style(bg, fg)}>${label}</span>`;
+  }
+  return '';
+}
+function setWdTemplate(t) { S.wdTemplate = t; renderGantt(); }
 
 function parseDate(raw){
   if(!raw)return null;
@@ -482,7 +539,9 @@ function joinFragments(lines) {
       result.push(line + ' ' + next);
       i += 2;
     // If current has NO date but is short label, and next has date — merge (e.g. "WCQ: (PV SVTP)" + "10/27-11/25")
-    } else if (!hasDates && nextHasDates && line.length < 30 && !isNoiseLine(line) && !/^\d{4}/.test(line)) {
+    // EXCEPT: "WCQ/WHQ: (DB SVTP)" is a section header — never merge it with next date line
+    } else if (!hasDates && nextHasDates && line.length < 30 && !isNoiseLine(line) && !/^\d{4}/.test(line)
+               && !/^(?:WCQ|WHQ)\/(?:WCQ|WHQ)\s*:/i.test(line)) {
       result.push(line + ' ' + next);
       i += 2;
     } else {
@@ -510,6 +569,28 @@ function parseScheduleText(txt, srcName) {
   });
 
   lines = joinFragments(lines);
+
+  // SVTP label injection: Wistron uses "WCQ/WHQ: (DB SVTP)" as a section header,
+  // followed later by "WCQ: 8/24-9/23 (4 weeks)" / "WHQ: 8/28-9/23 (3.5 weeks)".
+  // We inject the SVTP label into those date lines so they get the right event name & phase.
+  let curSVTPLabel = null;
+  lines = lines.map(l => {
+    // Group header: "WCQ/WHQ: (DB SVTP)" — remember the label
+    const grp = l.match(/^(?:WCQ|WHQ)\/(?:WCQ|WHQ)\s*:\s*\(([^)]+)\)/i);
+    if (grp) { curSVTPLabel = grp[1].trim(); return l; }
+    // Single-company label with no date: "WCQ: (PV SVTP)" — update context
+    if (/^(WCQ|WHQ)\s*:\s*\([^)]+\)\s*$/.test(l) && !extractDates(l).length) {
+      const m2 = l.match(/\(([^)]+)\)/);
+      if (m2) curSVTPLabel = m2[1].trim();
+      return l;
+    }
+    // Transform "WCQ: 8/24-9/23 (4 weeks)" → "DB SVTP (WCQ) = 8/24-9/23 (4 weeks)"
+    if (curSVTPLabel) {
+      const m = l.match(/^(WCQ|WHQ)\s*:\s*(\d)/i);
+      if (m) return `${m[1]} ${curSVTPLabel} = ${l.replace(/^(WCQ|WHQ)\s*:\s*/i, '')}`;
+    }
+    return l;
+  });
 
   const phaseMap = new Map();
   for (const ph of PHASE_DEF) phaseMap.set(ph.name, { ...ph, milestones: [] });
@@ -859,6 +940,10 @@ function renderSummary(nameA, nameB) {
     </div>`;
   }).join('');
 
+  // Compute reference date = earliest milestone date across all phases (for W-Day / C-Day)
+  const refDate = phases.flatMap(ph => ph.milestones.map(m => m.date))
+    .reduce((min, d) => (!min || d < min) ? d : min, null);
+
   // Build milestone table
   let phasesHtml = '';
   let totalItems = 0;
@@ -891,7 +976,7 @@ function renderSummary(nameA, nameB) {
                     (ms.critical ? '<span style="margin-left:5px;font-size:.62rem;background:var(--red-lt);color:var(--red);padding:1px 5px;border-radius:3px;font-weight:700;vertical-align:middle">KEY</span>' : '');
                 })()}
               </td>
-              <td style="padding:7px 20px;font-family:var(--mono);font-size:.75rem;font-weight:600;text-align:right;color:${dateColor};${cls==='past'?'text-decoration:line-through':''};white-space:nowrap">${dateStr}<span style="font-size:.65rem;font-weight:400;color:#94a3b8;margin-left:3px">${getDow(ms.date)}</span></td>
+              <td style="padding:7px 20px;font-family:var(--mono);font-size:.75rem;font-weight:600;text-align:right;color:${dateColor};${cls==='past'?'text-decoration:line-through':''};white-space:nowrap">${getWdBadge(ms.date, refDate, S.wdTemplate)}${getWdBadge(ms.date, refDate, 'ww')}${getWdBadge(ms.date, refDate, 'dtt')}${dateStr}<span style="font-size:.65rem;font-weight:400;color:#94a3b8;margin-left:3px">${getDow(ms.date)}</span></td>
             </tr>`;
           }).join('')}
         </table>
@@ -939,10 +1024,23 @@ function renderSummary(nameA, nameB) {
           <button class="export-btn" onclick="exportCSV()">Export CSV</button>
         </div>
       </div>
-      <!-- Platform selector -->
+      <!-- Platform selector + date-format picker -->
       <div style="padding:8px 20px 10px;background:var(--surface2);border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);flex-shrink:0">Platform</span>
         <div style="display:flex;gap:6px;flex-wrap:wrap">${platChips}</div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3)">Project Day</span>
+          ${[
+            {k:'off',  label:'None'},
+            {k:'wday', label:'W-Day', tip:'Working day # from project start (Mon–Fri only)'},
+            {k:'cday', label:'C-Day', tip:'Calendar day # from project start'},
+          ].map(t => `<button onclick="setWdTemplate('${t.k}')" title="${t.tip||''}"
+            style="padding:2px 10px;border-radius:12px;font-size:.65rem;font-weight:700;font-family:var(--sans);
+            border:1.5px solid ${S.wdTemplate===t.k?'var(--accent)':'var(--border2)'};
+            background:${S.wdTemplate===t.k?'var(--accent)':'white'};
+            color:${S.wdTemplate===t.k?'white':'var(--text-2)'};
+            cursor:pointer;transition:all .15s">${t.label}</button>`).join('')}
+        </div>
       </div>
     </div>
 
